@@ -1,0 +1,544 @@
+"""CareService: all care logic. MCP tools, the dashboard API and the scheduler call into this."""
+
+from __future__ import annotations
+
+import difflib
+import re
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta
+
+import anyio
+
+from . import llm, notify, scam
+from .config import now, settings
+from .models import (
+    Alert,
+    AlertKind,
+    AlertLevel,
+    CareSummary,
+    CheckIn,
+    CheckInResult,
+    DayAdherence,
+    DoseLog,
+    LogDoseResult,
+    Medication,
+    NotifyResult,
+    Profile,
+    Refill,
+    RefillResult,
+    ScamAssessment,
+    ScheduleItem,
+    ScheduleResult,
+)
+from .store import Store
+
+FILLER = {"my", "the", "a", "pill", "pills", "medicine", "medication", "meds", "tablet", "tablets", "dose", "for", "i", "take"}
+SERIOUS = {
+    "fell": "reported a fall",
+    "fall": "reported a fall",
+    "chest pain": "chest pain",
+    "can't breathe": "trouble breathing",
+    "short of breath": "trouble breathing",
+    "dizzy": "dizziness",
+    "confused": "confusion",
+}
+MILD = {"lonely": "feeling lonely", "sad": "feeling sad", "headache": "headache", "nausea": "nausea", "tired": "fatigue", "pain": "pain"}
+DUE_WINDOW = timedelta(minutes=30)  # a dose counts as "due" from 30 min before its time
+MATCH_WINDOW = timedelta(hours=4)  # a logged dose satisfies a slot within 4 hours of it
+DELIVERY_TIME = timedelta(hours=3)
+AWAKE = ("08:00", "21:00")  # inactivity is only worth a text during waking hours
+OPEN_REFILL = {"requested", "contacting_pharmacy", "verifying", "approved"}
+
+
+def _hhmm(t: str) -> tuple[int, int]:
+    h, m = t.split(":")
+    return int(h), int(m)
+
+
+def _at(day: datetime, t: str) -> datetime:
+    h, m = _hhmm(t)
+    return day.replace(hour=h, minute=m, second=0, microsecond=0)
+
+
+def spoken_time(t: str) -> str:
+    h, m = _hhmm(t)
+    suffix = "AM" if h < 12 else "PM"
+    h12 = h % 12 or 12
+    return f"{h12} {suffix}" if m == 0 else f"{h12}:{m:02d} {suffix}"
+
+
+def _spoken_dt(iso: str) -> str:
+    return spoken_time(datetime.fromisoformat(iso).strftime("%H:%M"))
+
+
+class CareService:
+    def __init__(self, store: Store):
+        self.store = store
+
+    # ---------- profile & activity ----------
+
+    def profile(self) -> Profile:
+        doc = self.store.get("profile", "main")
+        if not doc:
+            raise RuntimeError("No profile. Seed demo data with `kinvesper --seed`.")
+        return Profile.model_validate(doc)
+
+    def touch_activity(self) -> None:
+        p = self.profile()
+        p.last_activity = now().isoformat()
+        self.store.save("profile", p, id="main")
+
+    # ---------- medications ----------
+
+    def medications(self) -> list[Medication]:
+        meds = [m for m in self.store.load_all("med", Medication) if m.active]
+        return sorted(meds, key=lambda m: (min(m.times), m.name))
+
+    def find_medication(self, query: str) -> Medication | None:
+        meds = self.medications()
+        words = [w for w in re.findall(r"[a-z']+", query.lower()) if w not in FILLER]
+        q = " ".join(words)
+        if not q:
+            return None
+        for m in meds:
+            if m.name.lower() in q or q in m.name.lower():
+                return m
+        # purpose match ("blood pressure pill" -> Lisinopril)
+        best, best_score = None, 0
+        for m in meds:
+            purpose_words = set(re.findall(r"[a-z]+", m.purpose.lower()))
+            score = len(purpose_words & set(words))
+            if score > best_score:
+                best, best_score = m, score
+        if best:
+            return best
+        # misspellings ("lisinoprill")
+        names = {m.name.lower(): m for m in meds}
+        for w in words:
+            close = difflib.get_close_matches(w, names, n=1, cutoff=0.7)
+            if close:
+                return names[close[0]]
+        return None
+
+    def add_medication(self, med: Medication) -> Medication:
+        self.store.save("med", med)
+        return med
+
+    # ---------- doses & schedule ----------
+
+    def _logs_for(self, date: str) -> dict[tuple[str, str], DoseLog]:
+        return {(d.medication_id, d.slot): d for d in self.store.load_all("dose", DoseLog) if d.date == date}
+
+    def _status(self, slot_dt: datetime, current: datetime, taken: bool) -> str:
+        if taken:
+            return "taken"
+        if current > slot_dt + timedelta(minutes=settings.missed_dose_grace_min):
+            return "missed"
+        if current >= slot_dt - DUE_WINDOW:
+            return "due"
+        return "upcoming"
+
+    def schedule(self, medication: str | None = None) -> ScheduleResult:
+        current = now()
+        date = current.date().isoformat()
+        logs = self._logs_for(date)
+        meds = self.medications()
+        if medication:
+            match = self.find_medication(medication)
+            meds = [match] if match else []
+        items = []
+        for m in meds:
+            for t in m.times:
+                log = logs.get((m.id, t))
+                items.append(
+                    ScheduleItem(
+                        medication=m.name,
+                        dose=m.dose,
+                        purpose=m.purpose,
+                        time=t,
+                        status=self._status(_at(current, t), current, log is not None),
+                        taken_at=log.taken_at if log else None,
+                        instructions=m.instructions,
+                    )
+                )
+        items.sort(key=lambda i: (i.time, i.medication))
+        low = [m.name for m in meds if m.pills_remaining <= settings.low_stock_threshold]
+        return ScheduleResult(date=date, items=items, low_stock=low, spoken_summary=self._speak_schedule(items, low, medication))
+
+    def _speak_schedule(self, items: list[ScheduleItem], low: list[str], medication: str | None) -> str:
+        if medication and not items:
+            return f"I couldn't find a medication called {medication} on your list."
+        if medication:
+            parts = []
+            for i in items:
+                if i.status == "taken":
+                    parts.append(f"Yes, you took your {spoken_time(i.time)} {i.medication} at {_spoken_dt(i.taken_at)}.")
+                elif i.status == "missed":
+                    parts.append(f"You haven't taken your {spoken_time(i.time)} {i.medication} yet, and it's overdue.")
+                elif i.status == "due":
+                    parts.append(f"Your {spoken_time(i.time)} {i.medication} is due now and you haven't taken it yet.")
+                else:
+                    parts.append(f"Your next {i.medication} is at {spoken_time(i.time)}.")
+            text = " ".join(parts)
+        else:
+            pending = [i for i in items if i.status in ("due", "missed")]
+            upcoming = [i for i in items if i.status == "upcoming"]
+            taken = sum(i.status == "taken" for i in items)
+            text = f"You've taken {taken} of {len(items)} doses today."
+            if pending:
+                text += " Still to take now: " + ", ".join(f"{i.medication} from {spoken_time(i.time)}" for i in pending) + "."
+            if upcoming:
+                n = upcoming[0]
+                text += f" Next up is {n.medication} at {spoken_time(n.time)}."
+        if low:
+            text += f" You're running low on {', '.join(low)}. I can order a refill."
+        return text
+
+    def log_dose(self, medication: str, taken_at: datetime | None = None, source: str = "voice") -> LogDoseResult:
+        med = self.find_medication(medication)
+        if not med:
+            names = ", ".join(m.name for m in self.medications())
+            return LogDoseResult(status="not_found", message=f"I couldn't find {medication}. Your medications are {names}.")
+        current = taken_at or now()
+        date = current.date().isoformat()
+        logs = self._logs_for(date)
+
+        slots = sorted(med.times, key=lambda t: abs(_at(current, t) - current))
+        near = [t for t in slots if abs(_at(current, t) - current) <= MATCH_WINDOW]
+        open_slots = [t for t in near if (med.id, t) not in logs]
+        # an overdue dose from earlier today also counts
+        overdue = [t for t in med.times if (med.id, t) not in logs and _at(current, t) < current and t not in open_slots]
+
+        if not open_slots and not overdue:
+            # `slots` is ordered by closeness to now, so this is the most relevant dose already taken today
+            taken = [t for t in slots if (med.id, t) in logs and _at(current, t) - MATCH_WINDOW <= current]
+            if taken:
+                prev = logs[(med.id, taken[0])]
+                return LogDoseResult(
+                    status="already_taken",
+                    medication=med.name,
+                    slot=taken[0],
+                    taken_at=prev.taken_at,
+                    pills_remaining=med.pills_remaining,
+                    message=(
+                        f"You already took your {spoken_time(taken[0])} {med.name} at {_spoken_dt(prev.taken_at)}. "
+                        "Please don't take another one. Taking a double dose could be unsafe."
+                    ),
+                )
+            nxt = min(med.times, key=lambda t: (_at(current, t) - current) % timedelta(days=1))
+            return LogDoseResult(
+                status="not_due",
+                medication=med.name,
+                message=f"Your {med.name} isn't due right now. The next dose is at {spoken_time(nxt)}.",
+            )
+
+        slot = (open_slots or overdue)[0]
+        self.store.save("dose", DoseLog(medication_id=med.id, date=date, slot=slot, taken_at=current.isoformat(), source=source))
+        med.pills_remaining = max(0, med.pills_remaining - med.pills_per_dose)
+        self.store.save("med", med)
+        low = med.pills_remaining <= settings.low_stock_threshold
+        msg = f"Got it. I've logged your {spoken_time(slot)} {med.name}."
+        if med.instructions:
+            msg += f" Remember: {med.instructions}."
+        if low:
+            msg += f" You have {med.pills_remaining} left, so I'd suggest ordering a refill."
+        return LogDoseResult(
+            status="logged", medication=med.name, slot=slot, taken_at=current.isoformat(),
+            pills_remaining=med.pills_remaining, low_stock=low, message=msg,
+        )
+
+    # ---------- refills ----------
+
+    def refills(self) -> list[Refill]:
+        return sorted(self.store.load_all("refill", Refill), key=lambda r: r.created_at, reverse=True)
+
+    async def request_refill(
+        self,
+        medication: str,
+        fulfillment: str = "pickup",
+        on_status: Callable[[Refill], Awaitable[None]] | None = None,
+        step_seconds: float = 0,
+    ) -> RefillResult:
+        """Walk a refill through a simulated pharmacy. `on_status` is called after every step."""
+        med = self.find_medication(medication)
+        if not med:
+            names = ", ".join(m.name for m in self.medications())
+            return RefillResult(message=f"I couldn't find {medication}. Your medications are {names}.")
+        for r in self.refills():
+            if r.medication_id == med.id and r.status in OPEN_REFILL:
+                return RefillResult(refill=r, message=f"A refill for {med.name} is already on its way. {r.status_message}.")
+
+        pharmacy = self.profile().pharmacy_name
+        stamp = now().isoformat()
+        refill = Refill(medication_id=med.id, medication_name=med.name, fulfillment=fulfillment,
+                        status_message=f"Refill requested for {med.name}", created_at=stamp, updated_at=stamp)
+        steps = [
+            ("contacting_pharmacy", f"Sending the prescription to {pharmacy}"),
+            ("verifying", "The pharmacist is checking the prescription"),
+            ("approved", f"Approved. {pharmacy} is preparing {med.name}"),
+            ("ready", f"{med.name} is ready for pickup" if fulfillment == "pickup" else f"{med.name} is out for delivery"),
+        ]
+        try:
+            self.store.save("refill", refill)
+            if on_status:
+                await on_status(refill)
+            for status, text in steps:
+                await anyio.sleep(step_seconds)
+                refill.status, refill.status_message, refill.updated_at = status, text, now().isoformat()
+                self.store.save("refill", refill)
+                if on_status:
+                    await on_status(refill)
+        except BaseException:
+            refill.status, refill.status_message = "failed", "The refill request was interrupted"
+            self.store.save("refill", refill)
+            raise
+
+        if fulfillment == "pickup":
+            refill.ready_by = refill.updated_at
+            msg = f"Good news! Your {med.name} refill is ready to pick up at {pharmacy}."
+        else:
+            ready = now() + DELIVERY_TIME
+            refill.ready_by = ready.isoformat()
+            msg = f"Good news! {pharmacy} is delivering your {med.name}. It should arrive by {spoken_time(ready.strftime('%H:%M'))}."
+        self.store.save("refill", refill)
+        where = "ready for pickup" if fulfillment == "pickup" else "out for delivery"
+        await self.raise_alert("info", "refill", f"{med.name} refill {where}", msg, dedupe_key=f"refill:{refill.id}")
+        return RefillResult(refill=refill, message=msg)
+
+    # ---------- alerts ----------
+
+    def alerts(self, include_acknowledged: bool = True) -> list[Alert]:
+        items = self.store.load_all("alert", Alert)
+        if not include_acknowledged:
+            items = [a for a in items if not a.acknowledged]
+        return sorted(items, key=lambda a: a.created_at, reverse=True)
+
+    async def raise_alert(
+        self, level: AlertLevel, kind: AlertKind, title: str, detail: str = "",
+        dedupe_key: str | None = None, sms: bool | None = None,
+    ) -> Alert:
+        if dedupe_key:
+            for a in self.store.load_all("alert", Alert):
+                if a.dedupe_key == dedupe_key:
+                    return a
+        alert = Alert(created_at=now().isoformat(), level=level, kind=kind, title=title, detail=detail, dedupe_key=dedupe_key)
+        if sms if sms is not None else level != "info":
+            p = self.profile()
+            alert.notified = await notify.send(f"Kinvesper: {title}", f"{detail}\n— about {p.patient_name}")
+        self.store.save("alert", alert)
+        return alert
+
+    def acknowledge(self, alert_id: str) -> Alert | None:
+        alert = self.store.load("alert", alert_id, Alert)
+        if alert:
+            alert.acknowledged = True
+            self.store.save("alert", alert)
+        return alert
+
+    async def message_caregiver(self, message: str, urgent: bool = False, confirmed_by_user: bool | None = None) -> NotifyResult:
+        p = self.profile()
+        alert = await self.raise_alert(
+            "urgent" if urgent else "warning", "caregiver_message",
+            f"Message from {p.preferred_name}", message, sms=True,
+        )
+        return NotifyResult(sent=True, alert_id=alert.id, confirmed_by_user=confirmed_by_user,
+                            message=f"Okay, I've sent that to {p.caregiver_name}.")
+
+    async def emergency(self, description: str) -> NotifyResult:
+        p = self.profile()
+        alert = await self.raise_alert("urgent", "emergency", f"EMERGENCY: {p.preferred_name} needs help", description, sms=True)
+        return NotifyResult(
+            sent=True,
+            alert_id=alert.id,
+            message=(
+                f"I've sent an urgent alert to {p.caregiver_name}. If you're hurt, can't breathe, or have chest pain, "
+                "please call 911 right away. Stay where you are and stay calm. Help is on the way."
+            ),
+        )
+
+    # ---------- scams ----------
+
+    async def check_scam(self, description: str) -> ScamAssessment:
+        result = await scam.assess(description)
+        if result.risk == "high":
+            p = self.profile()
+            await self.raise_alert(
+                "warning", "scam", f"Possible scam targeting {p.preferred_name}",
+                f"{description}\nRed flags: {'; '.join(result.red_flags)}",
+            )
+            result.family_alerted = True
+            result.advice += f" I've also let {p.caregiver_name} know so they can check in with you."
+        return result
+
+    # ---------- wellbeing ----------
+
+    async def check_in(self, mood: str, notes: str = "") -> CheckInResult:
+        text = f"{mood} {notes}".lower()
+        serious = sorted({v for k, v in SERIOUS.items() if k in text})
+        mild = sorted({v for k, v in MILD.items() if re.search(rf"\b{re.escape(k)}\b", text)} - set(serious))
+        concerns = serious + mild
+        self.store.save("checkin", CheckIn(at=now().isoformat(), mood=mood, notes=notes, concerns=concerns))
+        p = self.profile()
+        alerted = False
+        if serious or mood == "unwell":
+            await self.raise_alert(
+                "urgent" if serious else "warning", "checkin",
+                f"{p.preferred_name} isn't feeling well", f"Mood: {mood}. {notes}".strip(),
+            )
+            alerted = True
+        elif mood == "low":
+            await self.raise_alert("info", "checkin", f"{p.preferred_name} is feeling low today", notes)
+
+        if serious:
+            msg = f"I'm sorry to hear that. I've told {p.caregiver_name}. If it gets worse or you feel unsafe, please call 911."
+        elif mood in ("great", "good"):
+            msg = "That's wonderful to hear! I've noted it."
+        elif mood == "unwell":
+            msg = f"I'm sorry you're not feeling well. I've let {p.caregiver_name} know. Would you like me to remind you to rest and drink some water?"
+        else:
+            msg = "Thanks for telling me. I've noted it. Would you like me to call someone or play something cheerful?"
+        return CheckInResult(recorded=True, concerns=concerns, caregiver_alerted=alerted, message=msg)
+
+    # ---------- proactive checks (scheduler) ----------
+
+    async def run_checks(self) -> list[Alert]:
+        """Missed doses, inactivity and low stock. Safe to run often: every alert is de-duplicated."""
+        current = now()
+        date = current.date().isoformat()
+        p = self.profile()
+        seen = {a.dedupe_key for a in self.alerts()}
+        raised: list[Alert] = []
+
+        async def alert(*args, dedupe_key: str, **kwargs) -> None:
+            if dedupe_key not in seen:
+                seen.add(dedupe_key)
+                raised.append(await self.raise_alert(*args, dedupe_key=dedupe_key, **kwargs))
+
+        logs = self._logs_for(date)
+        for m in self.medications():
+            for t in m.times:
+                if (m.id, t) not in logs and current > _at(current, t) + timedelta(minutes=settings.missed_dose_grace_min):
+                    await alert(
+                        "warning", "missed_dose", f"{p.preferred_name} missed the {spoken_time(t)} {m.name}",
+                        f"{m.name} {m.dose} was due at {spoken_time(t)} and hasn't been logged.",
+                        dedupe_key=f"missed:{date}:{m.id}:{t}",
+                    )
+            open_refill = any(r.medication_id == m.id and r.status in OPEN_REFILL for r in self.refills())
+            if m.pills_remaining <= settings.low_stock_threshold and not open_refill:
+                await alert(
+                    "info", "low_stock", f"{m.name} is running low",
+                    f"{m.pills_remaining} pills left. Remind {p.preferred_name} to order a refill.",
+                    dedupe_key=f"low:{date}:{m.id}",
+                )
+
+        if p.last_activity and AWAKE[0] <= current.strftime("%H:%M") <= AWAKE[1]:
+            idle = current - datetime.fromisoformat(p.last_activity)
+            if idle >= timedelta(hours=settings.inactivity_hours):
+                hours = int(idle.total_seconds() // 3600)
+                await alert(
+                    "warning", "inactivity", f"No activity from {p.preferred_name} in {hours} hours",
+                    f"Last interaction at {_spoken_dt(p.last_activity)}. Consider giving {p.preferred_name} a call.",
+                    dedupe_key=f"inactivity:{p.last_activity}",  # once per quiet spell
+                )
+        return raised
+
+    # ---------- dashboard ----------
+
+    def checkins(self, days: int = 14) -> list[CheckIn]:
+        cutoff = (now() - timedelta(days=days)).isoformat()
+        return sorted((c for c in self.store.load_all("checkin", CheckIn) if c.at >= cutoff), key=lambda c: c.at)
+
+    def dashboard(self) -> dict:
+        p = self.profile()
+        by_day = self.adherence(7)
+        scheduled = sum(d.scheduled for d in by_day)
+        taken = sum(d.taken for d in by_day)
+        today = self.schedule()
+        return {
+            "generated_at": now().isoformat(),
+            "profile": p.model_dump(),
+            "adherence": {
+                "pct": round(100 * taken / scheduled, 1) if scheduled else None,
+                "taken": taken, "scheduled": scheduled,
+                "by_day": [d.model_dump() for d in by_day],
+            },
+            "today": today.model_dump(),
+            "alerts": [a.model_dump() for a in self.alerts()[:30]],
+            "open_alerts": sum(not a.acknowledged for a in self.alerts()),
+            "checkins": [c.model_dump() for c in self.checkins(14)],
+            "medications": [
+                {**m.model_dump(), "low_stock": m.pills_remaining <= settings.low_stock_threshold}
+                for m in self.medications()
+            ],
+            "refills": [r.model_dump() for r in self.refills()[:5]],
+        }
+
+    # ---------- summaries ----------
+
+    def adherence(self, days: int = 7) -> list[DayAdherence]:
+        current = now()
+        logs = self.store.load_all("dose", DoseLog)
+        taken_keys = {(d.date, d.medication_id, d.slot) for d in logs}
+        meds = self.medications()
+        out = []
+        for back in range(days - 1, -1, -1):
+            day = current - timedelta(days=back)
+            date = day.date().isoformat()
+            slots = [(m.id, t) for m in meds for t in m.times]
+            if back == 0:  # today: only doses whose grace period has passed, or already taken
+                slots = [
+                    (mid, t) for mid, t in slots
+                    if (date, mid, t) in taken_keys or current > _at(day, t) + timedelta(minutes=settings.missed_dose_grace_min)
+                ]
+            out.append(DayAdherence(date=date, scheduled=len(slots), taken=sum((date, mid, t) in taken_keys for mid, t in slots)))
+        return out
+
+    async def summary(self, days: int = 7, narrate: bool = True) -> CareSummary:
+        by_day = self.adherence(days)
+        scheduled = sum(d.scheduled for d in by_day)
+        taken = sum(d.taken for d in by_day)
+        pct = round(100 * taken / scheduled, 1) if scheduled else 100.0
+        cutoff = (now() - timedelta(days=days)).isoformat()
+        checkins = sorted((c for c in self.store.load_all("checkin", CheckIn) if c.at >= cutoff), key=lambda c: c.at)
+        alerts = [a for a in self.alerts() if a.created_at >= cutoff]
+        missed = self._missed_labels(days)
+        p = self.profile()
+
+        narrative = (
+            f"Over the last {days} days {p.preferred_name} took {taken} of {scheduled} scheduled doses ({pct}%). "
+            f"{len(missed)} doses were missed. {sum(not a.acknowledged for a in alerts)} alerts need attention."
+        )
+        if narrate:
+            text = await llm.complete(
+                system=(
+                    "You write a short weekly care update for a family caregiver about their elderly parent. "
+                    "Warm, factual, 4-6 sentences, plain text, no markdown. Call out patterns (e.g. evening doses "
+                    "missed), wellbeing trends, and one concrete suggestion. Do not invent facts."
+                ),
+                prompt=(
+                    f"Patient: {p.patient_name}. Caregiver: {p.caregiver_name}.\n"
+                    f"Adherence by day: {[d.model_dump() for d in by_day]}\nMissed doses: {missed}\n"
+                    f"Check-ins: {[c.model_dump(include={'at', 'mood', 'notes', 'concerns'}) for c in checkins]}\n"
+                    f"Alerts: {[a.model_dump(include={'created_at', 'level', 'title', 'acknowledged'}) for a in alerts]}"
+                ),
+            )
+            narrative = text or narrative
+        return CareSummary(
+            days=days, adherence_pct=pct, doses_scheduled=scheduled, doses_taken=taken, by_day=by_day,
+            missed=missed, open_alerts=sum(not a.acknowledged for a in alerts),
+            recent_moods=[c.mood for c in checkins[-5:]], narrative=narrative,
+        )
+
+    def _missed_labels(self, days: int) -> list[str]:
+        current = now()
+        taken = {(d.date, d.medication_id, d.slot) for d in self.store.load_all("dose", DoseLog)}
+        out = []
+        for back in range(days - 1, -1, -1):
+            day = current - timedelta(days=back)
+            date = day.date().isoformat()
+            for m in self.medications():
+                for t in m.times:
+                    overdue = current > _at(day, t) + timedelta(minutes=settings.missed_dose_grace_min)
+                    if overdue and (date, m.id, t) not in taken:
+                        out.append(f"{day.strftime('%a')} {spoken_time(t)} {m.name}")
+        return out

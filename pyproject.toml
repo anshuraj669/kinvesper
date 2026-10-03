@@ -1,0 +1,44 @@
+[project]
+name = "kinvesper"
+version = "0.1.0"
+description = "Kinvesper: a voice-first eldercare companion exposed as an MCP server (spec 2025-11-25) for Alexa+"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic[bedrock]>=1.9.0",
+    "boto3>=1.43.104",
+    # 1.30 is the last line that ships the 2025-11-25 experimental Tasks API (removed in 2.x).
+    "mcp[cli]==1.30.0",
+    "pydantic>=2.13.5",
+    "pyjwt[crypto]>=2.10",
+    "starlette>=1.7.0",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+kinvesper = "kinvesper.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kinvesper"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# mcp 1.30 flags its experimental Tasks API as going away in 2.x; we pin 1.30 on purpose.
+filterwarnings = ["ignore:The experimental tasks API is deprecated:DeprecationWarning"]
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+infra = [
+    "aws-cdk-lib>=2.200",
+    "constructs>=10",
+]

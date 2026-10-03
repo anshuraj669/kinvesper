@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinvesper Dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f6f5; --panel: #ffffff; --ink: #14201d; --ink-2: #4a5754; --muted: #6f7c78; --line: #dfe5e3;
+    --brand: #0f766e; --brand-soft: #d9f0ec; --wash: #f1f4f3;
+    --grid: #e1e0d9; --axis: #c3c2b7; --series: #2a78d6; --series-wash: rgba(42,120,214,.10);
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --shadow: 0 1px 2px rgba(16,24,22,.06), 0 8px 24px rgba(16,24,22,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --ink-2: #c3cfcb; --muted: #93a39f; --line: #25332f;
+      --brand: #2dd4bf; --brand-soft: #123a35; --wash: #1c2a27;
+      --grid: #2c2c2a; --axis: #383835; --series: #3987e5; --series-wash: rgba(57,135,229,.14);
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --ink-2: #c3cfcb; --muted: #93a39f; --line: #25332f;
+    --brand: #2dd4bf; --brand-soft: #123a35; --wash: #1c2a27;
+    --grid: #2c2c2a; --axis: #383835; --series: #3987e5; --series-wash: rgba(57,135,229,.14);
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  header h1 span { color: var(--muted); font-weight: 450; }
+  .who { color: var(--ink-2); font-size: 14px; }
+  .spacer { flex: 1; }
+  .btn {
+    font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-decoration: none;
+  }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--panel); }
+  .btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+  main > * { min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px; }
+  .card h2 { font-size: 15px; margin: 0 0 2px; font-weight: 650; }
+  .card .sub { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+  .span-3 { grid-column: span 3; } .span-4 { grid-column: span 4; } .span-5 { grid-column: span 5; }
+  .span-6 { grid-column: span 6; } .span-7 { grid-column: span 7; } .span-8 { grid-column: span 8; }
+  /* stat tiles */
+  .tile .label { font-size: 13px; color: var(--ink-2); }
+  .tile .value { font-size: 30px; font-weight: 650; line-height: 1.2; margin-top: 4px; }
+  .tile.hero .value { font-size: 52px; }
+  .tile .note { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  /* status: icon + label, never color alone */
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+  .status svg { width: 14px; height: 14px; flex: none; }
+  /* lists */
+  .rows { list-style: none; margin: 0; padding: 0; }
+  .rows li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+  .rows li:first-child { border-top: none; padding-top: 0; }
+  .rows .main { flex: 1; min-width: 0; }
+  .rows .title { font-weight: 600; }
+  .rows .detail { font-size: 13px; color: var(--ink-2); white-space: pre-line; overflow-wrap: anywhere; }
+  .rows .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .rows li.done { opacity: .6; }
+  .rows .time { font-variant-numeric: tabular-nums; color: var(--ink-2); width: 64px; flex: none; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .scroll { max-height: 420px; overflow-y: auto; }
+  /* charts */
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .chart text { fill: var(--muted); font-size: 12px; font-family: inherit; }
+  .chart text.value { fill: var(--ink); font-weight: 600; }
+  .tip {
+    position: absolute; pointer-events: none; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; box-shadow: var(--shadow); white-space: nowrap; opacity: 0;
+    transform: translate(-50%, -100%); transition: opacity .1s;
+  }
+  .tip strong { display: block; }
+  details.table { margin-top: 10px; font-size: 13px; }
+  details.table summary { cursor: pointer; color: var(--ink-2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; border-top: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th, td.nowrap { white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--panel);
+    padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .error { grid-column: 1 / -1; color: var(--critical); }
+  @media (max-width: 900px) {
+    main { grid-template-columns: repeat(2, 1fr); padding: 16px; }
+    .span-3 { grid-column: span 1; }
+    .span-4, .span-5, .span-6, .span-7, .span-8 { grid-column: 1 / -1; }
+    .tile.hero .value { font-size: 44px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kinvesper <span>· caregiver dashboard</span></h1>
+  <span class="who" id="who"></span>
+  <div class="spacer"></div>
+  <button class="btn" id="runChecks" type="button">Run checks now</button>
+  <a class="btn primary" href="/voice">Voice simulator</a>
+</header>
+<main id="main" aria-live="polite"><p class="empty">Loading…</p></main>
+<div class="toast" id="toast" role="status"></div>
+<script>
+(() => {
+  const key = new URLSearchParams(location.search).get("key") || "";
+  const headers = key ? { "X-Dashboard-Key": key } : {};
+  const MOODS = ["great", "good", "okay", "low", "unwell"];
+  const STATUS = {
+    taken: ["good", "Taken"], due: ["warning", "Due now"], missed: ["critical", "Missed"], upcoming: ["muted", "Upcoming"],
+    urgent: ["critical", "Urgent"], warning: ["warning", "Warning"], info: ["muted", "Info"],
+  };
+  const ICONS = {
+    good: '<circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+    warning: '<path d="M7 1l6.3 11H.7z" fill="var(--warning)"/><path d="M7 5v3.2M7 10.2h.01" stroke="#1a1a19" stroke-width="1.6" stroke-linecap="round"/>',
+    critical: '<circle cx="7" cy="7" r="6" fill="var(--critical)"/><path d="M4.8 4.8l4.4 4.4M9.2 4.8l-4.4 4.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>',
+    muted: '<circle cx="7" cy="7" r="5.2" fill="none" stroke="var(--muted)" stroke-width="1.6"/>',
+  };
+  const open = new Set();  // which "Show as table" panels are open, kept across refreshes
+  let observers = [];      // chart resize observers, dropped on every re-render
+  const watch = (el, fn) => { const o = new ResizeObserver(fn); o.observe(el); observers.push(o); };
+
+  function h(tag, attrs = {}, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") el.className = v;
+      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+      else if (v !== undefined && v !== null && v !== false) el.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) el.append(kid);
+    return el;
+  }
+  function svg(tag, attrs = {}) {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  }
+  function status(kind) {
+    const [tone, label] = STATUS[kind] || ["muted", kind];
+    const s = h("span", { class: "status" });
+    s.innerHTML = `<svg viewBox="0 0 14 14" aria-hidden="true">${ICONS[tone]}</svg>`;
+    s.append(label);
+    return s;
+  }
+  const lowStock = () => { const s = status("warning"); s.lastChild.textContent = "Low stock"; return s; };
+  const ago = (iso) => {
+    if (!iso) return "never";
+    const min = Math.round((Date.now() - new Date(iso)) / 60000);
+    if (min < 1) return "just now";
+    if (min < 60) return `${min} min ago`;
+    if (min < 60 * 24) return `${Math.round(min / 60)} h ago`;
+    return `${Math.round(min / 1440)} d ago`;
+  };
+  const day = (iso, opts = { weekday: "short" }) => new Date(iso + (iso.length === 10 ? "T12:00:00" : "")).toLocaleDateString(undefined, opts);
+  const clock = (hhmm) => new Date(`2000-01-01T${hhmm}:00`).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const toast = (text) => { const t = document.getElementById("toast"); t.textContent = text; t.style.opacity = 1; setTimeout(() => (t.style.opacity = 0), 2500); };
+
+  function card(span, title, sub, ...body) {
+    return h("section", { class: `card ${span}` }, h("h2", {}, title), sub ? h("p", { class: "sub" }, sub) : null, ...body);
+  }
+  function tile(label, value, note, extra = "") {
+    return h("section", { class: `card tile span-3 ${extra}` }, h("div", { class: "label" }, label), h("div", { class: "value" }, value), note ? h("div", { class: "note" }, note) : null);
+  }
+  function tableView(id, head, rows) {
+    const d = h("details", { class: "table", ontoggle: () => (d.open ? open.add(id) : open.delete(id)) },
+      h("summary", {}, "Show as table"),
+      h("table", {}, h("thead", {}, h("tr", {}, head.map(([t, num]) => h("th", { class: num ? "num" : "" }, t)))),
+        h("tbody", {}, rows.map((r) => h("tr", {}, r.map((c, i) => h("td", { class: head[i][1] ? "num" : "" }, c)))))));
+    d.open = open.has(id);
+    return d;
+  }
+  function tooltip(box) {
+    const tip = h("div", { class: "tip", role: "tooltip" });
+    box.append(tip);
+    return {
+      show(x, y, title, text) { tip.replaceChildren(h("strong", {}, title), text); tip.style.left = `${x}px`; tip.style.top = `${y - 8}px`; tip.style.opacity = 1; },
+      hide() { tip.style.opacity = 0; },
+    };
+  }
+
+  // ---- 7-day adherence: one series, columns of % taken ----
+  function adherenceChart(byDay) {
+    const box = h("div", { class: "chart" });
+    const draw = () => {
+      box.replaceChildren();
+      const W = Math.max(box.clientWidth, 260), H = 200, L = 40, R = 8, T = 18, B = 26;
+      const s = svg("svg", { height: H, role: "img", "aria-label": "Doses taken per day, last 7 days" });
+      const y = (p) => T + (H - T - B) * (1 - p / 100);
+      for (const p of [0, 50, 100]) {
+        s.append(svg("line", { x1: L, x2: W - R, y1: y(p), y2: y(p), stroke: p === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1 }));
+        const t = svg("text", { x: L - 8, y: y(p) + 4, "text-anchor": "end" }); t.textContent = `${p}%`; s.append(t);
+      }
+      const band = (W - L - R) / byDay.length, bw = Math.min(24, band * 0.6);
+      const pct = byDay.map((d) => (d.scheduled ? Math.round((100 * d.taken) / d.scheduled) : null));
+      const known = pct.filter((p) => p !== null);
+      const lowest = known.length ? Math.min(...known) : null;
+      const tip = tooltip(box);
+      byDay.forEach((d, i) => {
+        const cx = L + band * i + band / 2, p = pct[i], isToday = i === byDay.length - 1;
+        if (p !== null && p > 0) {
+          const x = cx - bw / 2, top = y(p), base = y(0), r = Math.min(4, base - top);
+          s.append(svg("path", {
+            d: `M${x},${base}V${top + r}Q${x},${top} ${x + r},${top}H${x + bw - r}Q${x + bw},${top} ${x + bw},${top + r}V${base}Z`,
+            fill: "var(--series)",
+          }));
+        }
+        if (p !== null && (isToday || p === lowest)) {  // label selectively: today and the low point
+          const t = svg("text", { x: cx, y: y(p) - 6, "text-anchor": "middle", class: "value" }); t.textContent = `${p}%`; s.append(t);
+        }
+        const lbl = svg("text", { x: cx, y: H - 6, "text-anchor": "middle" }); lbl.textContent = isToday ? "Today" : day(d.date); s.append(lbl);
+        const hit = svg("rect", { x: L + band * i, y: T, width: band, height: H - T - B, fill: "transparent" });
+        hit.addEventListener("mouseenter", () => tip.show(cx, p === null ? y(0) : y(p), day(d.date, { weekday: "long", month: "short", day: "numeric" }),
+          d.scheduled ? `${d.taken} of ${d.scheduled} doses (${p}%)` : "No doses due yet"));
+        hit.addEventListener("mouseleave", tip.hide);
+        s.append(hit);
+      });
+      box.prepend(s);
+    };
+    requestAnimationFrame(draw);
+    watch(box, draw);
+    return box;
+  }
+
+  // ---- mood: dots on an ordinal axis, one series ----
+  function moodChart(checkins) {
+    const box = h("div", { class: "chart" });
+    if (!checkins.length) return h("p", { class: "empty" }, "No check-ins in the last two weeks.");
+    const draw = () => {
+      box.replaceChildren();
+      const W = Math.max(box.clientWidth, 260), H = 200, L = 58, R = 12, T = 12, B = 26;
+      const s = svg("svg", { height: H, role: "img", "aria-label": "Mood at each daily check-in, last 14 days" });
+      const y = (m) => T + ((H - T - B) * MOODS.indexOf(m)) / (MOODS.length - 1);
+      const t0 = new Date(checkins[0].at).getTime(), t1 = new Date(checkins[checkins.length - 1].at).getTime();
+      const x = (iso) => (t1 === t0 ? (L + W - R) / 2 : L + ((W - L - R) * (new Date(iso).getTime() - t0)) / (t1 - t0));
+      MOODS.forEach((m) => {
+        s.append(svg("line", { x1: L, x2: W - R, y1: y(m), y2: y(m), stroke: "var(--grid)", "stroke-width": 1 }));
+        const t = svg("text", { x: L - 10, y: y(m) + 4, "text-anchor": "end" }); t.textContent = m[0].toUpperCase() + m.slice(1); s.append(t);
+      });
+      s.append(svg("polyline", {
+        points: checkins.map((c) => `${x(c.at)},${y(c.mood)}`).join(" "),
+        fill: "none", stroke: "var(--series)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round", opacity: 0.45,
+      }));
+      const tip = tooltip(box);
+      const marks = [0, Math.floor((checkins.length - 1) / 2), checkins.length - 1];
+      checkins.forEach((c, i) => {
+        const cx = x(c.at), cy = y(c.mood);
+        s.append(svg("circle", { cx, cy, r: 5, fill: "var(--series)", stroke: "var(--panel)", "stroke-width": 2 }));
+        if (marks.includes(i)) {
+          const t = svg("text", { x: cx, y: H - 6, "text-anchor": i === 0 ? "start" : i === checkins.length - 1 ? "end" : "middle" });
+          t.textContent = day(c.at, { month: "short", day: "numeric" }); s.append(t);
+        }
+        const hit = svg("circle", { cx, cy, r: 14, fill: "transparent" });
+        hit.addEventListener("mouseenter", () => tip.show(cx, cy, `${day(c.at, { weekday: "short", month: "short", day: "numeric" })} · ${c.mood}`,
+          c.notes || (c.concerns.length ? c.concerns.join(", ") : "No notes")));
+        hit.addEventListener("mouseleave", tip.hide);
+        s.append(hit);
+      });
+      box.prepend(s);
+    };
+    requestAnimationFrame(draw);
+    watch(box, draw);
+    return box;
+  }
+
+  async function ack(id) {
+    const r = await fetch(`/api/alerts/${id}/ack`, { method: "POST", headers });
+    if (r.ok) { toast("Alert acknowledged"); load(); }
+  }
+
+  function render(d) {
+    const p = d.profile, today = d.today.items;
+    const taken = today.filter((i) => i.status === "taken").length;
+    const missed = today.filter((i) => i.status === "missed").length;
+    const urgent = d.alerts.filter((a) => !a.acknowledged && a.level === "urgent").length;
+    observers.forEach((o) => o.disconnect());
+    observers = [];
+    document.getElementById("who").textContent = `${p.patient_name} · cared for by ${p.caregiver_name}`;
+
+    const alerts = d.alerts.length
+      ? h("ul", { class: "rows scroll" }, d.alerts.map((a) => h("li", { class: a.acknowledged ? "done" : "" },
+          h("div", { class: "main" },
+            h("div", { class: "title" }, a.title),
+            a.detail ? h("div", { class: "detail" }, a.detail) : null,
+            h("div", { class: "meta" }, status(a.level), ` · ${ago(a.created_at)}`, a.notified ? " · texted" : "", a.acknowledged ? " · acknowledged" : "")),
+          a.acknowledged ? null : h("button", { class: "btn", type: "button", onclick: () => ack(a.id) }, "Acknowledge"))))
+      : h("p", { class: "empty" }, "No alerts. All quiet.");
+
+    const doses = h("ul", { class: "rows" }, today.map((i) => h("li", {},
+      h("span", { class: "time" }, clock(i.time)),
+      h("div", { class: "main" }, h("div", { class: "title" }, `${i.medication} ${i.dose}`),
+        h("div", { class: "meta" }, i.taken_at ? `Logged ${new Date(i.taken_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : i.purpose)),
+      status(i.status))));
+
+    const meds = h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Medication"), h("th", {}, "Times"), h("th", { class: "num" }, "Pills left"))),
+      h("tbody", {}, d.medications.map((m) => h("tr", {},
+        h("td", {}, h("strong", {}, m.name), ` ${m.dose}`, m.instructions ? h("div", { class: "meta", style: "color:var(--muted)" }, m.instructions) : null,
+          m.low_stock ? h("div", {}, lowStock()) : null),
+        h("td", { class: "nowrap" }, m.times.map(clock).join(", ")),
+        h("td", { class: "num" }, String(m.pills_remaining)))))));
+
+    const refills = d.refills.length
+      ? h("ul", { class: "rows" }, d.refills.map((r) => h("li", {}, h("div", { class: "main" },
+          h("div", { class: "title" }, `${r.medication_name} · ${r.fulfillment}`),
+          h("div", { class: "detail" }, r.status_message), h("div", { class: "meta" }, ago(r.updated_at))))))
+      : h("p", { class: "empty" }, "No refill requests yet.");
+
+    const pct = d.adherence.pct === null ? "—" : `${Math.round(d.adherence.pct)}%`;
+    document.getElementById("main").replaceChildren(
+      tile("7-day adherence", pct, `${d.adherence.taken} of ${d.adherence.scheduled} doses taken`, "hero"),
+      tile("Doses today", `${taken} of ${today.length}`, missed ? `${missed} missed` : "None missed"),
+      tile("Open alerts", String(d.open_alerts), urgent ? `${urgent} urgent` : "None urgent"),
+      tile("Last active", ago(p.last_activity), p.last_activity ? new Date(p.last_activity).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : ""),
+      card("span-7", "Alerts", "Newest first. Warnings and urgent alerts are texted to the caregiver.", alerts),
+      card("span-5", "Today's doses", day(d.today.date, { weekday: "long", month: "long", day: "numeric" }), doses),
+      card("span-7", "Doses taken, last 7 days", "Share of scheduled doses logged each day. Today counts only doses already due.",
+        adherenceChart(d.adherence.by_day),
+        tableView("adherence", [["Day"], ["Taken", 1], ["Scheduled", 1], ["Share", 1]],
+          d.adherence.by_day.map((x) => [day(x.date, { weekday: "short", month: "short", day: "numeric" }), String(x.taken), String(x.scheduled),
+            x.scheduled ? `${Math.round((100 * x.taken) / x.scheduled)}%` : "—"]))),
+      card("span-5", "Mood at check-in", "Last 14 days",
+        moodChart(d.checkins),
+        tableView("mood", [["When"], ["Mood"], ["Notes"]],
+          d.checkins.map((c) => [day(c.at, { weekday: "short", month: "short", day: "numeric" }), c.mood, c.notes || "—"]))),
+      card("span-7", "Medications", null, meds),
+      card("span-5", "Pharmacy refills", p.pharmacy_name, refills),
+    );
+  }
+
+  let loading = false;
+  async function load() {
+    if (loading) return;
+    loading = true;
+    try {
+      const r = await fetch("/api/dashboard", { headers });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      render(data);
+    } catch (e) {
+      document.getElementById("main").replaceChildren(h("p", { class: "error" }, `Couldn't load the dashboard: ${e.message}`));
+    } finally {
+      loading = false;
+    }
+  }
+
+  document.getElementById("runChecks").addEventListener("click", async () => {
+    const r = await fetch("/api/checks", { method: "POST", headers });
+    const data = await r.json().catch(() => ({}));
+    toast(r.ok ? (data.raised ? `${data.raised} new alert${data.raised > 1 ? "s" : ""}` : "Checks done. Nothing new.") : "Checks failed");
+    load();
+  });
+  setInterval(() => { if (document.visibilityState === "visible") load(); }, 15000);
+  load();
+})();
+</script>
+</body>
+</html>

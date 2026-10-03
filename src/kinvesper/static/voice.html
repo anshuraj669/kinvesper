@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinvesper Voice</title>
+<style>
+  :root {
+    --bg: #f4f6f5; --panel: #ffffff; --ink: #14201d; --muted: #5d6b67; --line: #dfe5e3;
+    --brand: #0f766e; --brand-soft: #d9f0ec; --user: #0f766e; --user-ink: #ffffff;
+    --bot: #eef2f1; --warn: #b45309; --warn-soft: #fdf1e0; --err: #b91c1c;
+    --ring-idle: #9fb8b3; --ring-listen: #22d3ee; --ring-think: #0f766e; --ring-speak: #14b8a6;
+    --shadow: 0 1px 2px rgba(16,24,22,.06), 0 8px 24px rgba(16,24,22,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --muted: #93a39f; --line: #25332f;
+      --brand: #2dd4bf; --brand-soft: #123a35; --user: #14b8a6; --user-ink: #04201c;
+      --bot: #1c2a27; --warn: #fbbf24; --warn-soft: #3a2c10; --err: #f87171;
+      --ring-idle: #3d524d; --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --muted: #93a39f; --line: #25332f;
+    --brand: #2dd4bf; --brand-soft: #123a35; --user: #14b8a6; --user-ink: #04201c;
+    --bot: #1c2a27; --warn: #fbbf24; --warn-soft: #3a2c10; --err: #f87171;
+    --ring-idle: #3d524d; --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+    border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  header h1 span { color: var(--muted); font-weight: 450; }
+  .badge {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--brand-soft);
+    color: var(--brand); font-weight: 600; white-space: nowrap;
+  }
+  .spacer { flex: 1; }
+  .toggle {
+    display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted);
+    cursor: pointer; user-select: none;
+  }
+  main {
+    display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 20px;
+    max-width: 1180px; margin: 0 auto; padding: 20px; height: calc(100% - 59px);
+  }
+  main > * { min-width: 0; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: var(--shadow);
+  }
+  /* ---- speaker ---- */
+  .speaker { padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .orb {
+    width: 150px; height: 150px; border-radius: 50%; position: relative; display: grid; place-items: center;
+    background: radial-gradient(circle at 50% 45%, var(--panel) 52%, transparent 53%),
+                conic-gradient(var(--ring), var(--ring));
+    --ring: var(--ring-idle); transition: filter .3s;
+  }
+  .orb::after {
+    content: ""; position: absolute; inset: -8px; border-radius: 50%;
+    border: 3px solid var(--ring); opacity: 0; transition: opacity .3s;
+  }
+  .orb[data-state="listening"] { --ring: var(--ring-listen); }
+  .orb[data-state="thinking"] { --ring: var(--ring-think); }
+  .orb[data-state="speaking"] { --ring: var(--ring-speak); }
+  .orb[data-state="listening"]::after, .orb[data-state="speaking"]::after { opacity: .5; animation: pulse 1.4s ease-out infinite; }
+  .orb[data-state="thinking"] {
+    background: radial-gradient(circle at 50% 45%, var(--panel) 52%, transparent 53%),
+                conic-gradient(from var(--spin, 0deg), var(--ring) 0 30%, var(--ring-idle) 30% 100%);
+    animation: spin 1s linear infinite;
+  }
+  @property --spin { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+  @keyframes spin { to { --spin: 360deg; } }
+  @keyframes pulse { from { transform: scale(.96); opacity: .6; } to { transform: scale(1.12); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .orb, .orb::after { animation: none !important; } }
+  .mic {
+    width: 64px; height: 64px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--brand); color: var(--panel); display: grid; place-items: center;
+  }
+  .mic svg { width: 28px; height: 28px; }
+  .mic[aria-pressed="true"] { background: var(--ring-listen); color: #04201c; }
+  .mic:disabled { opacity: .45; cursor: not-allowed; }
+  .status { font-size: 15px; color: var(--muted); min-height: 24px; text-align: center; }
+  .note { font-size: 13px; color: var(--muted); text-align: center; margin: 0; }
+  .scenarios { padding: 16px 20px 20px; border-top: 1px solid var(--line); width: 100%; }
+  .scenarios h2, .trace-title { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .scenarios button {
+    display: block; width: 100%; text-align: left; margin: 0 0 8px; padding: 9px 12px; font: inherit;
+    font-size: 14px; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+    border-radius: 10px; cursor: pointer;
+  }
+  .scenarios button:hover { border-color: var(--brand); }
+  .left { display: flex; flex-direction: column; overflow: auto; }
+  /* ---- conversation ---- */
+  .convo { display: flex; flex-direction: column; min-height: 0; }
+  .log { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 78%; display: flex; flex-direction: column; gap: 6px; }
+  .msg .bubble { padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.user .bubble { background: var(--user); color: var(--user-ink); border-bottom-right-radius: 4px; }
+  .msg.bot .bubble { background: var(--bot); border-bottom-left-radius: 4px; }
+  .msg.update .bubble { background: var(--brand-soft); }
+  .msg.confirm .bubble { background: var(--warn-soft); }
+  .tag { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .msg.confirm .tag { color: var(--warn); }
+  .calls { display: flex; flex-direction: column; gap: 6px; }
+  details.call {
+    font-size: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  }
+  details.call summary {
+    cursor: pointer; padding: 6px 10px; display: flex; gap: 8px; align-items: center; list-style: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  details.call summary::-webkit-details-marker { display: none; }
+  details.call summary::before { content: "▸"; color: var(--muted); }
+  details.call[open] summary::before { content: "▾"; }
+  details.call.error summary { color: var(--err); }
+  .pill { font-family: system-ui, sans-serif; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+  details.call pre {
+    margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); overflow-x: auto;
+    font-size: 12px; color: var(--muted);
+  }
+  .composer { display: flex; gap: 8px; padding: 14px; border-top: 1px solid var(--line); }
+  .composer input {
+    flex: 1; min-width: 0; font: inherit; padding: 11px 14px; border-radius: 12px; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line);
+  }
+  .composer input:focus, button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  .composer button, .quick button {
+    font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 12px; border: none; cursor: pointer;
+    background: var(--brand); color: var(--panel);
+  }
+  .quick { display: flex; gap: 8px; }
+  .quick button.no { background: var(--bot); color: var(--ink); }
+  .error-banner { color: var(--err); padding: 10px 20px; font-size: 14px; }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; height: auto; padding: 16px; }
+    .convo { height: 70vh; }
+    .msg { max-width: 92%; }
+    header { padding: 12px 16px; flex-wrap: wrap; }
+    #scenarios { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; }
+    .scenarios button { flex: 0 0 220px; margin: 0; scroll-snap-align: start; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kinvesper <span>· voice simulator</span></h1>
+  <span class="badge" id="mode">connecting…</span>
+  <div class="spacer"></div>
+  <label class="toggle"><input type="checkbox" id="speakToggle" checked> Speak replies</label>
+</header>
+<main>
+  <section class="card left" aria-label="Speaker">
+    <div class="speaker">
+      <div class="orb" id="orb" data-state="idle" aria-hidden="true"></div>
+      <div class="status" id="status" role="status" aria-live="polite">Starting…</div>
+      <button class="mic" id="mic" aria-pressed="false" aria-label="Talk" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+      <p class="note" id="micNote"></p>
+    </div>
+    <div class="scenarios">
+      <h2>Try saying</h2>
+      <div id="scenarios"></div>
+    </div>
+  </section>
+  <section class="card convo" aria-label="Conversation">
+    <div class="log" id="log" aria-live="polite"></div>
+    <div class="error-banner" id="error" hidden></div>
+    <form class="composer" id="composer">
+      <input id="text" autocomplete="off" placeholder="Type what you'd say…" aria-label="Message" disabled>
+      <button type="submit" id="send" disabled>Send</button>
+    </form>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const key = new URLSearchParams(location.search).get("key") || "";
+  const headers = { "Content-Type": "application/json", ...(key ? { "X-Simulator-Key": key } : {}) };
+  let sid = null, caregiver = "Priya", busy = false, heardByVoice = false;
+  const speech = window.speechSynthesis;
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognizer = null, listening = false;
+
+  const setState = (state, text) => { $("orb").dataset.state = state; $("status").textContent = text; };
+  const showError = (text) => { $("error").textContent = text; $("error").hidden = !text; };
+
+  function addMessage(kind, text, { tag, calls } = {}) {
+    const wrap = document.createElement("div");
+    wrap.className = `msg ${kind}`;
+    if (tag) {
+      const t = document.createElement("div");
+      t.className = "tag"; t.textContent = tag; wrap.append(t);
+    }
+    const bubble = document.createElement("div");
+    bubble.className = "bubble"; bubble.textContent = text; wrap.append(bubble);
+    if (calls && calls.length) {
+      const list = document.createElement("div");
+      list.className = "calls";
+      for (const c of calls) {
+        const d = document.createElement("details");
+        d.className = "call" + (c.is_error ? " error" : "");
+        const s = document.createElement("summary");
+        s.append(document.createTextNode(c.name));
+        if (c.as_task) { const p = document.createElement("span"); p.className = "pill"; p.textContent = "task"; s.append(p); }
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(c.arguments, null, 2) + (c.spoken ? `\n→ ${c.spoken}` : "");
+        d.append(s, pre); list.append(d);
+      }
+      wrap.append(list);
+    }
+    $("log").append(wrap);
+    wrap.scrollIntoView({ behavior: "smooth", block: "end" });
+    return wrap;
+  }
+
+  function speak(text, then) {
+    if (!$("speakToggle").checked || !speech) { setState("idle", "Tap the mic or type"); then && then(); return; }
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95;
+    const voice = speech.getVoices().find((v) => v.lang === "en-US" && /natural|google|samantha/i.test(v.name));
+    if (voice) u.voice = voice;
+    u.onstart = () => setState("speaking", "Speaking…");
+    u.onend = u.onerror = () => { setState("idle", "Tap the mic or type"); then && then(); };
+    speech.speak(u);
+  }
+
+  function confirmButtons(msg) {
+    const row = document.createElement("div");
+    row.className = "quick";
+    for (const [label, cls] of [["Yes", ""], ["No", "no"]]) {
+      const b = document.createElement("button");
+      b.textContent = label; b.className = cls;
+      b.onclick = () => { row.remove(); send(label); };
+      row.append(b);
+    }
+    msg.append(row);
+  }
+
+  async function send(text) {
+    text = text.trim();
+    if (!text || !sid || busy) return;
+    busy = true; showError("");
+    speech && speech.cancel();
+    document.querySelectorAll(".quick").forEach((q) => q.remove());
+    addMessage("user", text);
+    $("text").value = "";
+    setState("thinking", "Thinking…");
+    try {
+      const r = await fetch(`/api/voice/sessions/${sid}/turns`, { method: "POST", headers, body: JSON.stringify({ text }) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      const msg = addMessage(data.awaiting_confirmation ? "bot confirm" : "bot", data.reply, {
+        tag: data.awaiting_confirmation ? "Needs your OK" : undefined, calls: data.tool_calls,
+      });
+      if (data.awaiting_confirmation) confirmButtons(msg);
+      const voiceTurn = heardByVoice;
+      speak(data.reply, () => { if (data.awaiting_confirmation && voiceTurn) listen(); });
+    } catch (e) {
+      showError(`Couldn't reach Kinvesper: ${e.message}`);
+      setState("idle", "Tap the mic or type");
+    } finally {
+      busy = false; heardByVoice = false;
+    }
+  }
+
+  function listen() {
+    if (!recognizer || listening) return;
+    speech && speech.cancel();
+    try { recognizer.start(); } catch { /* already started */ }
+  }
+
+  function setupRecognition() {
+    if (!Recognition) {
+      $("micNote").textContent = "Voice input needs Chrome or Edge. You can type instead.";
+      return;
+    }
+    recognizer = new Recognition();
+    recognizer.lang = "en-US";
+    recognizer.interimResults = true;
+    recognizer.onstart = () => { listening = true; $("mic").setAttribute("aria-pressed", "true"); setState("listening", "Listening…"); };
+    recognizer.onend = () => {
+      listening = false; $("mic").setAttribute("aria-pressed", "false");
+      if ($("orb").dataset.state === "listening") setState("idle", "Tap the mic or type");
+    };
+    recognizer.onerror = (e) => { if (e.error === "not-allowed") $("micNote").textContent = "Microphone blocked. Allow it in the browser, or type."; };
+    recognizer.onresult = (e) => {
+      const res = e.results[e.results.length - 1];
+      $("text").value = res[0].transcript;
+      if (res.isFinal) { heardByVoice = true; send(res[0].transcript); }
+    };
+    $("mic").disabled = false;
+    $("mic").onclick = () => (listening ? recognizer.stop() : listen());
+  }
+
+  function scenarios() {
+    const list = [
+      "What pills do I need today?",
+      "Did I take my blood pressure pill?",
+      "I just took my blood pressure pill.",
+      "A man called saying my grandson is in jail and needs gift cards for bail. He said not to tell anyone.",
+      "I'm feeling a bit dizzy today.",
+      `Tell ${caregiver} I'm going to the doctor at 3.`,
+      "Can you order more of my cholesterol pills?",
+      "How was my week?",
+    ];
+    for (const text of list) {
+      const b = document.createElement("button");
+      b.textContent = `“${text}”`;
+      b.onclick = () => send(text);
+      $("scenarios").append(b);
+    }
+  }
+
+  async function pollAnnouncements() {
+    if (sid && document.visibilityState === "visible") {
+      try {
+        const r = await fetch(`/api/voice/sessions/${sid}/announcements`, { headers });
+        if (r.ok) {
+          for (const a of await r.json()) {
+            addMessage("bot update", a.text, { tag: "Update", calls: a.tool_calls });
+            if (!busy && !listening) speak(a.text);
+          }
+        }
+      } catch { /* try again next tick */ }
+    }
+    setTimeout(pollAnnouncements, 2000);
+  }
+
+  async function start() {
+    try {
+      const r = await fetch("/api/voice/sessions", { method: "POST", headers });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      sid = data.id; caregiver = data.caregiver;
+      $("mode").textContent = data.mode === "claude"
+        ? `Claude · ${data.provider === "bedrock" ? "Amazon Bedrock" : "Claude API"}`
+        : "Offline keyword router";
+      $("text").disabled = $("send").disabled = false;
+      scenarios(); setupRecognition();
+      setState("idle", "Tap the mic or type");
+      addMessage("bot", `Hi! I'm your Kinvesper helper. Ask me about your medicines, a suspicious call, or say "tell ${caregiver}…".`);
+      pollAnnouncements();
+    } catch (e) {
+      $("mode").textContent = "offline";
+      setState("idle", "Not connected");
+      showError(`Couldn't start: ${e.message}`);
+    }
+  }
+
+  $("composer").onsubmit = (e) => { e.preventDefault(); send($("text").value); };
+  addEventListener("pagehide", () => { if (sid) fetch(`/api/voice/sessions/${sid}`, { method: "DELETE", headers, keepalive: true }); });
+  start();
+})();
+</script>
+</body>
+</html>

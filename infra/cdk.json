@@ -1,0 +1,9 @@
+{
+  "app": "uv run --group infra python app.py",
+  "context": {
+    "careTz": "America/New_York",
+    "llmModel": "anthropic.claude-opus-5-5",
+    "callbackUrls": "http://localhost:8790/callback,http://127.0.0.1:8790/callback",
+    "retainData": "true"
+  }
+}
