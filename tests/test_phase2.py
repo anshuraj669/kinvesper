@@ -11,7 +11,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import CallToolResult, ElicitResult
 
-from kinvesper.auth import SERVICE_CLIENT_ID, JwtTokenVerifier
+from kinvesper.auth import SERVICE_CLIENT_ID, JwtTokenVerifier, authorization_server_metadata
 from kinvesper.config import Settings
 
 from .conftest import SERVICE_TOKEN, _run_server
@@ -190,6 +190,30 @@ async def test_service_token_verifier():
     token = await verifier.verify_token("s3cret")
     assert token.client_id == SERVICE_CLIENT_ID
     assert token.scopes == ["kinvesper/mcp"]
+
+
+def test_authorization_server_metadata_from_cognito():
+    cognito = {
+        "issuer": ISSUER,
+        "authorization_endpoint": "https://kinvesper-1.auth.us-east-1.amazoncognito.com/oauth2/authorize",
+        "token_endpoint": "https://kinvesper-1.auth.us-east-1.amazoncognito.com/oauth2/token",
+        "jwks_uri": f"{ISSUER}/.well-known/jwks.json",
+        "scopes_supported": ["openid", "email"],
+        "response_types_supported": ["code", "token"],
+    }
+    meta = authorization_server_metadata(cognito, ["kinvesper/mcp"])
+    assert meta["issuer"] == ISSUER
+    assert meta["authorization_endpoint"].endswith("/oauth2/authorize")
+    assert meta["code_challenge_methods_supported"] == ["S256"]
+    assert meta["response_types_supported"] == ["code"]
+    assert {"kinvesper/mcp", "openid"} <= set(meta["scopes_supported"])
+
+
+def test_authorization_server_metadata_route(auth_server, server_url):
+    # The test issuer doesn't exist, so the route answers but can't load Cognito's document.
+    assert httpx.get(f"{auth_server}/.well-known/oauth-authorization-server").status_code == 503
+    base = server_url.removesuffix("/mcp")
+    assert httpx.get(f"{base}/.well-known/oauth-authorization-server").status_code == 404  # auth off
 
 
 # ---------- tunnels ----------

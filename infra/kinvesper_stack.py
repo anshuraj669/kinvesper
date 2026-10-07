@@ -35,6 +35,7 @@ class KinvesperStack(cdk.Stack):
         care_tz: str = "UTC",
         caregiver_phone: str = "",
         ops_email: str = "",
+        llm_provider: str = "bedrock",
         llm_model: str = "anthropic.claude-opus-5-5",
         callback_urls: list[str] | None = None,
         retain_data: bool = True,
@@ -123,7 +124,7 @@ class KinvesperStack(cdk.Stack):
             "DYNAMODB_TABLE": table.table_name,
             "AWS_REGION": self.region,
             "CARE_TZ": care_tz,
-            "LLM_PROVIDER": "bedrock",
+            "LLM_PROVIDER": llm_provider,  # "none" runs offline (rule-based) until Bedrock access is granted
             "LLM_MODEL": llm_model,
             "SNS_TOPIC_ARN": alerts.topic_arn,
             "OAUTH_ISSUER": issuer,

@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from . import scheduler
+from .auth import metadata_routes
 from .config import settings
 from .dashboard import dashboard_routes
 from .mcp_server import build_server
@@ -50,7 +51,10 @@ def create_app(service: CareService | None = None, voice: VoiceSessions | None =
                 checks.cancel()
                 await voice.close_all()
 
-    routes = [Route("/health", health), *voice_routes(voice), *dashboard_routes(service), Mount("/", app=mcp_app)]
+    routes = [
+        Route("/health", health), *metadata_routes(settings), *voice_routes(voice), *dashboard_routes(service),
+        Mount("/", app=mcp_app),
+    ]
     app = Starlette(routes=routes, lifespan=lifespan)
     app.state.service = service
     app.state.mcp = mcp

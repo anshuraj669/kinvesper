@@ -51,6 +51,10 @@ npx aws-cdk@2 deploy -c careTz=America/New_York -c caregiverPhone=+15551234567 \
 
 The first boot seeds the demo household into DynamoDB.
 
+**No Bedrock access yet?** Add `-c llmProvider=none` to both deploys. The app runs with
+rule-based scam checks, template summaries and the keyword router in the voice simulator.
+Once Bedrock works, deploy again without it to switch Claude on.
+
 ## Use it
 
 ```bash

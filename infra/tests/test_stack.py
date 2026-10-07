@@ -99,5 +99,9 @@ def test_first_deploy_without_public_url():
     assert "PUBLIC_URL" not in _env(synth())
 
 
+def test_llm_provider_can_be_switched_off():
+    assert _env(synth(llm_provider="none"))["LLM_PROVIDER"] == "none"
+
+
 def test_destroy_mode():
     synth(retain_data=False).has_resource("AWS::DynamoDB::GlobalTable", {"DeletionPolicy": "Delete"})

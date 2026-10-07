@@ -11,9 +11,12 @@ import hmac
 import logging
 
 import anyio
+import httpx
 import jwt
 from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from .config import Settings
 
@@ -56,6 +59,45 @@ class JwtTokenVerifier:
             token=token, client_id=client_id or claims.get("sub", ""), scopes=scopes,
             expires_at=claims["exp"], subject=claims.get("sub"), claims=claims,
         )
+
+
+def authorization_server_metadata(oidc: dict, scopes: list[str]) -> dict:
+    """RFC 8414 metadata built from the issuer's OpenID configuration.
+
+    Alexa+ reads /.well-known/oauth-authorization-server from the MCP server itself, and
+    Cognito only publishes /.well-known/openid-configuration, so Kinvesper serves this copy.
+    """
+    keys = ("issuer", "authorization_endpoint", "token_endpoint", "jwks_uri", "revocation_endpoint", "userinfo_endpoint")
+    meta = {k: oidc[k] for k in keys if oidc.get(k)}
+    meta["scopes_supported"] = sorted({*scopes, *oidc.get("scopes_supported", [])})
+    meta["response_types_supported"] = ["code"]
+    meta["grant_types_supported"] = ["authorization_code", "refresh_token"]
+    meta["code_challenge_methods_supported"] = ["S256"]  # Cognito enforces PKCE but doesn't advertise it
+    meta["token_endpoint_auth_methods_supported"] = oidc.get(
+        "token_endpoint_auth_methods_supported", ["none", "client_secret_basic", "client_secret_post"])
+    return meta
+
+
+def metadata_routes(settings: Settings) -> list[Route]:
+    """/.well-known/oauth-authorization-server, fetched once from the issuer and cached."""
+    if not settings.oauth_issuer:
+        return []
+    cached: dict = {}
+
+    async def metadata(_request):
+        if not cached:
+            url = f"{settings.oauth_issuer.rstrip('/')}/.well-known/openid-configuration"
+            try:
+                async with httpx.AsyncClient(timeout=5) as http:
+                    r = await http.get(url)
+                    r.raise_for_status()
+                    cached.update(authorization_server_metadata(r.json(), settings.oauth_scope_list))
+            except (httpx.HTTPError, ValueError) as e:
+                log.warning("Could not load OAuth metadata from %s: %s", url, e)
+                return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
+        return JSONResponse(cached, headers={"Cache-Control": "public, max-age=3600"})
+
+    return [Route("/.well-known/oauth-authorization-server", metadata)]
 
 
 def auth_settings(settings: Settings) -> AuthSettings | None:
