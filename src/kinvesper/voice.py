@@ -2,7 +2,7 @@
 
 Each browser conversation is a VoiceSession holding its own MCP client connection to Kinvesper's
 /mcp endpoint, so the simulator uses exactly the protocol surface Alexa+ would. The brain is Claude
-(Bedrock or the Claude API) running a tool-use loop over the MCP tools, or, with LLM_PROVIDER=none,
+(Bedrock or the Claude API, or a local model through Ollama) running a tool-use loop over the MCP tools, or, with LLM_PROVIDER=none,
 a keyword router that picks one tool per utterance.
 
 MCP features surface in the conversation:
@@ -44,6 +44,10 @@ log = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", "The experimental tasks API is deprecated", DeprecationWarning)
 
 MAX_STEPS = 8
+LOCAL_HISTORY_TURNS = 4  # local models have small context windows: send only the last few exchanges
+# Free-text arguments the server scans for symptoms and scam signs. Small local models sometimes leave
+# them empty, so the person's own words are passed instead.
+SPOKEN_TEXT_ARGS = {"daily_check_in": "notes", "check_for_scam": "description"}
 TURN_TIMEOUT_S = 90
 CONFIRM_TIMEOUT_S = 120
 SESSION_IDLE_S = 30 * 60
@@ -80,6 +84,12 @@ class TurnResult(BaseModel):
 class Announcement(BaseModel):
     text: str
     tool_calls: list[ToolCall] = []
+
+
+def recent_turns(history: list[dict], turns: int) -> list[dict]:
+    """The history from the start of the last `turns` user utterances (never splitting a tool call from its result)."""
+    starts = [i for i, m in enumerate(history) if m["role"] == "user" and isinstance(m["content"], str)]
+    return history[starts[-turns]:] if len(starts) > turns else history
 
 
 def spoken_text(data: dict | None) -> str:
@@ -180,6 +190,7 @@ class VoiceSession:
         self.system = ""
         self.tools: list[dict] = []
         self.task_tools: set[str] = set()
+        self._utterance = ""
         self.meds: list[dict] = []
         self.caregiver = "family"
         self.history: list[dict] = []
@@ -289,6 +300,9 @@ class VoiceSession:
     async def _respond(self, text: str) -> str:
         if self.mode == "claude":
             return await self._respond_claude(text)
+        return await self._respond_offline(text)
+
+    async def _respond_offline(self, text: str) -> str:
         choice = route(text, self.meds, self.caregiver)
         if choice is None:
             return (f"I can help with your medicines, check a suspicious call, tell {self.caregiver} something, "
@@ -300,12 +314,17 @@ class VoiceSession:
         notes, self.notes = self.notes, []
         self.history.append({"role": "user", "content": "\n".join([*(f"[Update] {n}" for n in notes), text])})
         system = [{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}]
-        for _ in range(MAX_STEPS):
+        self._utterance = text
+        start = len(self.history) - 1
+        for step in range(MAX_STEPS):
+            messages = recent_turns(self.history, LOCAL_HISTORY_TURNS) if llm.local() else self.history
             try:
-                response = await llm.create_message(system=system, tools=self.tools, messages=self.history, max_tokens=4096)
+                response = await llm.create_message(system=system, tools=self.tools, messages=messages, max_tokens=4096)
             except anthropic.APIError as e:
-                log.warning("Claude call failed: %s", e)
-                self.history.pop()  # drop the unanswered user turn; earlier history is untouched
+                log.warning("LLM call failed: %s", e)
+                del self.history[start:]  # drop this whole turn; earlier history is untouched
+                if step == 0:  # nothing has run yet: answer with the keyword router instead
+                    return await self._respond_offline(text)
                 return "Sorry, I'm having trouble thinking right now. Please try again in a moment."
             if response.stop_reason == "refusal":
                 self.history.pop()
@@ -314,13 +333,24 @@ class VoiceSession:
             uses = [b for b in response.content if b.type == "tool_use"]
             if response.stop_reason != "tool_use" or not uses:
                 return llm.text_of(response) or "Okay."
-            results = await asyncio.gather(*(self._tool_result(u) for u in uses))
-            self.history.append({"role": "user", "content": list(results)})
+            done = await asyncio.gather(*(self._tool_result(u) for u in uses))
+            self.history.append({"role": "user", "content": [result for result, _ in done]})
+            spoken = [call.spoken for _, call in done]
+            if llm.local() and all(spoken):
+                # Every tool returns a spoken reply built from the real data. A local model skips its slow
+                # second call, and can't misstate doses or claim actions it didn't take.
+                reply = " ".join(spoken)
+                self.history.append({"role": "assistant", "content": reply})
+                return reply
         return "Sorry, that took me too many steps. Could you ask me again?"
 
-    async def _tool_result(self, use) -> dict:
-        content, call = await self._invoke(use.name, use.input if isinstance(use.input, dict) else {})
-        return {"type": "tool_result", "tool_use_id": use.id, "content": content, "is_error": call.is_error}
+    async def _tool_result(self, use) -> tuple[dict, ToolCall]:
+        args = dict(use.input) if isinstance(use.input, dict) else {}
+        key = SPOKEN_TEXT_ARGS.get(use.name)
+        if key and llm.local() and not str(args.get(key) or "").strip():
+            args[key] = self._utterance
+        content, call = await self._invoke(use.name, args)
+        return {"type": "tool_result", "tool_use_id": use.id, "content": content, "is_error": call.is_error}, call
 
     async def _invoke(self, name: str, args: dict) -> tuple[str, ToolCall]:
         """Call an MCP tool (as a task when it supports one). Returns model-facing content and a trace."""
@@ -370,9 +400,12 @@ class VoiceSessions:
     def __init__(self, connect: Connect = http_connect):
         self.connect = connect
         self._sessions: dict[str, VoiceSession] = {}
+        self._warm_up: asyncio.Task | None = None
 
     async def create(self) -> VoiceSession:
         await self.expire()
+        if llm.local() and (self._warm_up is None or self._warm_up.done()):
+            self._warm_up = asyncio.create_task(llm.warm_up())  # load the model while the page greets the user
         if len(self._sessions) >= MAX_SESSIONS:
             oldest = min(self._sessions.values(), key=lambda s: s.last_used)
             await self.close(oldest.id)
@@ -394,5 +427,7 @@ class VoiceSessions:
             await self.close(sid)
 
     async def close_all(self) -> None:
+        if self._warm_up:
+            self._warm_up.cancel()
         for sid in list(self._sessions):
             await self.close(sid)

@@ -39,7 +39,7 @@ from .models import (
     ScamAssessment,
     ScheduleResult,
 )
-from .service import CareService, spoken_time
+from .service import CareService, clean_message, spoken_time
 
 INSTRUCTIONS = """\
 Kinvesper helps an older adult who lives alone manage medications, avoid scams and stay
@@ -228,14 +228,17 @@ def build_server(service: CareService) -> KinvesperMCP:
         annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True),
     )
     async def notify_caregiver(
-        message: Annotated[str, Field(description="The message to send, in plain words")],
+        message: Annotated[str, Field(description=(
+            "The message itself, as the caregiver should read it (e.g. \"I'll call you tonight\"), "
+            "without \"Tell <name>\" in front"))],
         ctx: Context,
         urgent: bool = False,
     ) -> NotifyResult:
         service.touch_activity()  # any interaction counts as activity
+        caregiver = service.profile().caregiver_name
+        message = clean_message(message, caregiver)
         if not _can_elicit(ctx):
             return await service.message_caregiver(message, urgent)
-        caregiver = service.profile().caregiver_name
         answer = await ctx.elicit(f'Send this to {caregiver}? "{message}"', SendConfirmation)
         if answer.action == "accept" and answer.data.send:
             return await service.message_caregiver(message, urgent, confirmed_by_user=True)

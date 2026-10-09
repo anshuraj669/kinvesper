@@ -40,8 +40,9 @@ class Settings:
     dynamodb_table: str = field(default_factory=lambda: _env("DYNAMODB_TABLE", "kinvesper"))
     aws_region: str = field(default_factory=lambda: _env("AWS_REGION", _env("AWS_DEFAULT_REGION", "us-east-1")))
 
-    # LLM: "bedrock", "anthropic", or "none" (rule-based fallback, no credentials needed)
+    # LLM: "bedrock", "anthropic", "ollama" (local model), or "none" (rule-based fallback, no credentials needed)
     llm_provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "none"))
+    ollama_url: str = field(default_factory=lambda: _env("OLLAMA_URL", "http://localhost:11434"))
     llm_model: str = field(default_factory=lambda: _env("LLM_MODEL"))
     llm_effort: str = field(default_factory=lambda: _env("LLM_EFFORT", "low"))
 
@@ -73,7 +74,7 @@ class Settings:
         if self.llm_model:
             return self.llm_model
         # Bedrock model IDs carry the "anthropic." provider prefix.
-        return "anthropic.claude-opus-5-5" if self.llm_provider == "bedrock" else "claude-opus-5-5"
+        return {"bedrock": "anthropic.claude-opus-5-5", "ollama": "llama3.1"}.get(self.llm_provider, "claude-opus-5-5")
 
     @property
     def oauth_scope_list(self) -> list[str]:

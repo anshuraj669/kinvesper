@@ -39,8 +39,11 @@ SERIOUS = {
     "chest pain": "chest pain",
     "can't breathe": "trouble breathing",
     "short of breath": "trouble breathing",
-    "dizzy": "dizziness",
-    "confused": "confusion",
+    "trouble breathing": "trouble breathing",
+    "dizz": "dizziness",  # stems: substring match covers dizzy / dizziness, confused / confusion
+    "lightheaded": "dizziness",
+    "light-headed": "dizziness",
+    "confus": "confusion",
 }
 MILD = {"lonely": "feeling lonely", "sad": "feeling sad", "headache": "headache", "nausea": "nausea", "tired": "fatigue", "pain": "pain"}
 DUE_WINDOW = timedelta(minutes=30)  # a dose counts as "due" from 30 min before its time
@@ -69,6 +72,15 @@ def spoken_time(t: str) -> str:
 
 def _spoken_dt(iso: str) -> str:
     return spoken_time(datetime.fromisoformat(iso).strftime("%H:%M"))
+
+
+def clean_message(text: str, caregiver: str) -> str:
+    """Tidy a message the voice assistant passes along: undo JSON escapes some models leave in
+    ("I\\u0027ll" -> "I'll") and drop a leading "Tell Priya (that)" or "Let Priya know (that)"."""
+    text = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m[1], 16)), text).strip().strip('"\'').strip()
+    name = re.escape(caregiver)
+    rest = re.sub(rf"^(please\s+)?(tell\s+{name}|let\s+{name}\s+know)(\s+that)?[\s,:]+", "", text, flags=re.IGNORECASE)
+    return (rest[:1].upper() + rest[1:]) if rest else text
 
 
 class CareService:

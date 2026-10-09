@@ -181,6 +181,26 @@ async def test_claude_refusal_keeps_history_clean(connect, monkeypatch):
         await session.close()
 
 
+async def test_unreachable_llm_falls_back_to_keyword_router(connect, monkeypatch):
+    import anthropic
+    import httpx2
+
+    async def fake_create(**_params):
+        raise anthropic.APIConnectionError(request=httpx2.Request("POST", "http://ollama.invalid/v1/messages"))
+
+    monkeypatch.setattr(voice.llm, "enabled", lambda: True)
+    monkeypatch.setattr(voice.llm, "create_message", fake_create)
+    session = VoiceSession(connect=connect)
+    await session.start()
+    try:
+        out = await session.turn("Did I take my pills today?")
+        assert [c.name for c in out.tool_calls] == ["get_medication_schedule"]
+        assert "trouble" not in out.reply
+        assert session.history == []
+    finally:
+        await session.close()
+
+
 # ---------- simulator HTTP API ----------
 
 
@@ -202,3 +222,32 @@ def test_simulator_api(server_url):
 def test_simulator_off_with_oauth_and_no_key(auth_server):
     assert httpx.get(f"{auth_server}/voice").status_code == 404
     assert httpx.post(f"{auth_server}/api/voice/sessions").status_code == 404
+
+
+def test_ollama_provider_uses_local_messages_api(monkeypatch):
+    from kinvesper import llm
+    from kinvesper.config import Settings
+
+    local = Settings(llm_provider="ollama", ollama_url="http://127.0.0.1:11434")
+    monkeypatch.setattr(llm, "settings", local)
+    monkeypatch.setattr(llm, "_client", None)
+    assert llm.enabled()
+    assert local.model_id == "llama3.1"
+    assert str(llm.client().base_url).startswith("http://127.0.0.1:11434")
+
+
+def test_recent_turns_keeps_tool_calls_with_their_results():
+    from kinvesper.voice import recent_turns
+
+    history = []
+    for i in range(6):
+        history += [
+            {"role": "user", "content": f"question {i}"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": f"t{i}"}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": f"t{i}"}]},
+            {"role": "assistant", "content": f"answer {i}"},
+        ]
+    recent = recent_turns(history, 2)
+    assert recent[0] == {"role": "user", "content": "question 4"}
+    assert len(recent) == 8
+    assert recent_turns(history[:4], 2) == history[:4]

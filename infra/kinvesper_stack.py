@@ -37,6 +37,7 @@ class KinvesperStack(cdk.Stack):
         ops_email: str = "",
         llm_provider: str = "bedrock",
         llm_model: str = "anthropic.claude-opus-5-5",
+        ollama_url: str = "",
         callback_urls: list[str] | None = None,
         retain_data: bool = True,
         **kwargs,
@@ -113,11 +114,12 @@ class KinvesperStack(cdk.Stack):
         alerts.grant_publish(instance_role)
         for s in secrets.values():
             s.grant_read(instance_role)
-        instance_role.add_to_policy(iam.PolicyStatement(
-            sid="ClaudeInBedrock",  # Messages API endpoint (AnthropicBedrockMantle)
-            actions=["bedrock-mantle:CreateInference"],
-            resources=["*"],
-        ))
+        if llm_provider == "bedrock":
+            instance_role.add_to_policy(iam.PolicyStatement(
+                sid="ClaudeInBedrock",  # Messages API endpoint (AnthropicBedrockMantle)
+                actions=["bedrock-mantle:CreateInference"],
+                resources=["*"],
+            ))
 
         env = {
             "STORE": "dynamodb",
@@ -134,6 +136,12 @@ class KinvesperStack(cdk.Stack):
         }
         if public_url:
             env["PUBLIC_URL"] = public_url.rstrip("/")
+        if llm_provider == "bedrock":
+            env["LLM_MODEL"] = llm_model
+        else:
+            del env["LLM_MODEL"]  # each provider has its own default model
+        if llm_provider == "ollama":
+            env["OLLAMA_URL"] = ollama_url  # e.g. a tunnel to the machine running Ollama
 
         # One instance: MCP Streamable HTTP and voice sessions live in memory.
         scaling = apprunner.CfnAutoScalingConfiguration(

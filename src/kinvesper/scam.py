@@ -51,7 +51,8 @@ async def assess(description: str) -> ScamAssessment:
     risk, flags, _ = rule_assess(description)
     advice = SAFE_ADVICE[risk]
 
-    refined = await llm.complete(
+    # A small local model adds latency (and its own mistakes) on the voice path; the rules stand alone.
+    refined = None if llm.local() else await llm.complete(
         system=(
             "You protect an elderly person from phone, email and text scams. Given their description of a "
             "contact, return JSON only: {\"risk\": \"low|medium|high\", \"red_flags\": [short strings], "

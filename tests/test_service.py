@@ -61,8 +61,25 @@ async def test_checkin_with_fall_is_urgent(service):
     assert service.alerts()[0].level == "urgent"
 
 
+async def test_checkin_symptom_nouns_are_caught(service):
+    result = await service.check_in("low", "I'm feeling dizziness and some confusion")
+    assert result.caregiver_alerted
+    assert {"dizziness", "confusion"} <= set(result.concerns)
+
+
 async def test_summary_without_llm(service):
     summary = await service.summary(7)
     assert summary.doses_scheduled > 0
     assert 0 <= summary.adherence_pct <= 100
     assert summary.narrative
+
+
+def test_clean_message_for_caregiver():
+    from kinvesper.service import clean_message
+
+    assert clean_message(r"Tell Priya I'll call her tonight", "Priya") == "I'll call her tonight"
+    assert clean_message("tell priya that the doctor moved my appointment", "Priya") == "The doctor moved my appointment"
+    assert clean_message("Let Priya know, I took my pills", "Priya") == "I took my pills"
+    assert clean_message('"Please tell Priya hi"', "Priya") == "Hi"
+    assert clean_message("Ask Priya to bring milk", "Priya") == "Ask Priya to bring milk"  # meaning would change
+    assert clean_message("Tell Priya", "Priya") == "Tell Priya"  # nothing left to send otherwise

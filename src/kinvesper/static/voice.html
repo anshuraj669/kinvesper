@@ -343,9 +343,8 @@
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || r.statusText);
       sid = data.id; caregiver = data.caregiver;
-      $("mode").textContent = data.mode === "claude"
-        ? `Claude · ${data.provider === "bedrock" ? "Amazon Bedrock" : "Claude API"}`
-        : "Offline keyword router";
+      const providers = { bedrock: "Claude · Amazon Bedrock", anthropic: "Claude · Claude API", ollama: "Local model · Ollama" };
+      $("mode").textContent = data.mode === "claude" ? providers[data.provider] : "Offline keyword router";
       $("text").disabled = $("send").disabled = false;
       scenarios(); setupRecognition();
       setState("idle", "Tap the mic or type");

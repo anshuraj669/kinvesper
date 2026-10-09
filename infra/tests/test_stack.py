@@ -99,8 +99,27 @@ def test_first_deploy_without_public_url():
     assert "PUBLIC_URL" not in _env(synth())
 
 
+def _actions(template) -> set[str]:
+    actions = set()
+    for p in template.find_resources("AWS::IAM::Policy").values():
+        for st in p["Properties"]["PolicyDocument"]["Statement"]:
+            actions.update(st["Action"] if isinstance(st["Action"], list) else [st["Action"]])
+    return actions
+
+
 def test_llm_provider_can_be_switched_off():
-    assert _env(synth(llm_provider="none"))["LLM_PROVIDER"] == "none"
+    off = synth(llm_provider="none")
+    assert _env(off)["LLM_PROVIDER"] == "none"
+    assert "bedrock-mantle:CreateInference" not in _actions(off)
+
+
+def test_ollama_provider_without_bedrock():
+    local = synth(llm_provider="ollama", ollama_url="https://gpu.example.com")
+    env = _env(local)
+    assert env["LLM_PROVIDER"] == "ollama"
+    assert env["OLLAMA_URL"] == "https://gpu.example.com"
+    assert "LLM_MODEL" not in env
+    assert not any(a.startswith("bedrock") for a in _actions(local))
 
 
 def test_destroy_mode():

@@ -116,7 +116,15 @@ docker run -p 8080:8080 kinvesper      # http://127.0.0.1:8080/voice
 ## Configuration
 
 See `.env.example`. Everything runs offline with `LLM_PROVIDER=none` (rule-based scam detection
-and template summaries). Set `LLM_PROVIDER=bedrock` to use Claude on Amazon Bedrock.
+and template summaries). Set `LLM_PROVIDER=bedrock` to use Claude on Amazon Bedrock, or
+`LLM_PROVIDER=anthropic` for the Claude API.
+
+To use a free local model instead, run [Ollama](https://ollama.com) (it speaks the same Messages API):
+
+```bash
+ollama pull llama3.1
+LLM_PROVIDER=ollama uv run kinvesper     # LLM_MODEL=<any tool-capable model>, OLLAMA_URL=... to change
+```
 
 ## Layout
 
