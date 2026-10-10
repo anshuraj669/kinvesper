@@ -108,6 +108,13 @@ With OAuth on, the dashboard needs `DASHBOARD_KEY` (`/dashboard?key=...`).
 `infra/` holds a CDK stack that deploys Kinvesper on App Runner with DynamoDB, Bedrock, Cognito
 (OAuth 2.1), SNS, Secrets Manager, EventBridge and CloudWatch. Steps: [infra/README.md](infra/README.md).
 
+To run on your own machine against the deployed stack (same DynamoDB table and SNS topic as the
+cloud app) with a local Ollama model, after `aws configure`:
+
+```bash
+./scripts/run_local_aws.sh             # looks up the stack outputs, then starts the app on :8000
+```
+
 ```bash
 docker build -t kinvesper .            # the same image App Runner runs
 docker run -p 8080:8080 kinvesper      # http://127.0.0.1:8080/voice
