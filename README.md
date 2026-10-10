@@ -7,6 +7,14 @@ and keeps the family caregiver informed.
 ## Quick start
 
 ```bash
+make dev                                  # installs dependencies and starts everything on :8000
+```
+
+It uses a local [Ollama](https://ollama.com) model when one is running (`ollama pull llama3.1`),
+otherwise the offline keyword router, so it needs no accounts or keys. `make help` lists the other
+commands (`make test`, `make seed`, `make dev-aws`). Step by step instead:
+
+```bash
 uv sync
 uv run kinvesper                          # MCP endpoint at http://127.0.0.1:8000/mcp
                                           # voice simulator at http://127.0.0.1:8000/voice
