@@ -114,6 +114,11 @@ class KinvesperStack(cdk.Stack):
         alerts.grant_publish(instance_role)
         for s in secrets.values():
             s.grant_read(instance_role)
+        instance_role.add_to_policy(iam.PolicyStatement(
+            sid="SpokenReplies",  # Amazon Polly voice for the voice simulator
+            actions=["polly:SynthesizeSpeech"],
+            resources=["*"],
+        ))
         if llm_provider == "bedrock":
             instance_role.add_to_policy(iam.PolicyStatement(
                 sid="ClaudeInBedrock",  # Messages API endpoint (AnthropicBedrockMantle)

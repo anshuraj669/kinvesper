@@ -215,6 +215,12 @@ def test_simulator_api(server_url):
     reply = httpx.post(turns, json={"text": "Did I take my blood pressure pill?"}, timeout=30).json()
     assert reply["tool_calls"][0]["name"] == "get_medication_schedule"
     assert httpx.post(turns, json={"text": ""}).status_code == 400
+
+    speech = f"{base}/api/voice/sessions/{created['id']}"
+    assert created["server_voice"] is False and created["voice_input"] is False
+    assert httpx.post(f"{speech}/speech", json={"text": "Hello"}).status_code == 503  # page uses the browser's voice
+    assert httpx.post(f"{speech}/transcribe", content=b"").status_code == 400
+    assert httpx.post(f"{speech}/transcribe", content=b"audio").status_code == 422  # speech-to-text is off
     assert httpx.get(f"{base}/api/voice/sessions/nope/announcements").status_code == 404
     assert httpx.delete(f"{base}/api/voice/sessions/{created['id']}").status_code == 204
 
@@ -251,3 +257,28 @@ def test_recent_turns_keeps_tool_calls_with_their_results():
     assert recent[0] == {"role": "user", "content": "question 4"}
     assert len(recent) == 8
     assert recent_turns(history[:4], 2) == history[:4]
+
+
+def test_speech_hint_names_the_people_and_medicines():
+    from kinvesper.speech import hint_for
+
+    hint = hint_for("Margaret", "Priya", ["Atorvastatin", "Lisinopril"])
+    assert "Margaret" in hint and "Tell Priya" in hint and "Atorvastatin, Lisinopril" in hint
+
+
+def test_polly_without_credentials_falls_back_for_good(monkeypatch):
+    from botocore.exceptions import NoCredentialsError
+
+    from kinvesper import speech
+    from kinvesper.config import Settings
+
+    class NoCreds:
+        def synthesize_speech(self, **_):
+            raise NoCredentialsError()
+
+    monkeypatch.setattr(speech, "_polly", NoCreds())
+    monkeypatch.setattr(speech, "_polly_failed", False)
+    monkeypatch.setattr(speech, "settings", Settings(tts_provider="polly"))
+    with pytest.raises(speech.SpeechUnavailable):
+        speech._synthesize("Hello")
+    assert not speech.tts_available()

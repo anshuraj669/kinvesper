@@ -36,7 +36,7 @@ from mcp.shared.experimental.tasks.helpers import MODEL_IMMEDIATE_RESPONSE_KEY
 from mcp.types import CallToolResult, ElicitResult
 from pydantic import BaseModel
 
-from . import llm
+from . import llm, speech
 from .config import settings
 from .scam import rule_assess
 
@@ -193,6 +193,7 @@ class VoiceSession:
         self._utterance = ""
         self.meds: list[dict] = []
         self.caregiver = "family"
+        self.patient = "The person"
         self.history: list[dict] = []
         self.notes: list[str] = []  # background updates for the model, sent with the next user turn
         self.announcements: list[Announcement] = []
@@ -208,6 +209,11 @@ class VoiceSession:
         self._runner: asyncio.Task | None = None
 
     # ----- connection lifecycle -----
+
+    @property
+    def speech_hint(self) -> str:
+        """Names speech-to-text should expect: the person, their caregiver and their medicines."""
+        return speech.hint_for(self.patient, self.caregiver, [m["name"] for m in self.meds])
 
     async def start(self) -> None:
         """Open the MCP connection in a long-lived task (its context managers must enter and exit there)."""
@@ -226,6 +232,7 @@ class VoiceSession:
                 profile = json.loads((await session.read_resource("care://profile")).contents[0].text)
                 self.meds = json.loads((await session.read_resource("care://medications")).contents[0].text)
                 self.caregiver = profile["caregiver_name"]
+                self.patient = profile["preferred_name"]
                 self.system = VOICE_RULES.format(name=profile["preferred_name"]) + "\n" + instructions
                 self._ready.set()
                 await self._closed.wait()
@@ -401,11 +408,14 @@ class VoiceSessions:
         self.connect = connect
         self._sessions: dict[str, VoiceSession] = {}
         self._warm_up: asyncio.Task | None = None
+        self._speech_warm_up: asyncio.Task | None = None
 
     async def create(self) -> VoiceSession:
         await self.expire()
         if llm.local() and (self._warm_up is None or self._warm_up.done()):
             self._warm_up = asyncio.create_task(llm.warm_up())  # load the model while the page greets the user
+        if self._speech_warm_up is None:
+            self._speech_warm_up = asyncio.create_task(speech.warm_up())  # Whisper, once per process
         if len(self._sessions) >= MAX_SESSIONS:
             oldest = min(self._sessions.values(), key=lambda s: s.last_used)
             await self.close(oldest.id)
@@ -427,7 +437,8 @@ class VoiceSessions:
             await self.close(sid)
 
     async def close_all(self) -> None:
-        if self._warm_up:
-            self._warm_up.cancel()
+        for task in (self._warm_up, self._speech_warm_up):
+            if task:
+                task.cancel()
         for sid in list(self._sessions):
             await self.close(sid)

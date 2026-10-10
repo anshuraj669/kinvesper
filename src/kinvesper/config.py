@@ -43,6 +43,12 @@ class Settings:
     # LLM: "bedrock", "anthropic", "ollama" (local model), or "none" (rule-based fallback, no credentials needed)
     llm_provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "none"))
     ollama_url: str = field(default_factory=lambda: _env("OLLAMA_URL", "http://localhost:11434"))
+
+    # Voice simulator speech: Whisper model (name, local path, or "off") for speech-to-text; "polly" or
+    # "browser" for text-to-speech (Polly falls back to the browser's voice when it can't be used).
+    stt_model: str = field(default_factory=lambda: _env("STT_MODEL", "small.en"))
+    tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "polly"))
+    tts_voice: str = field(default_factory=lambda: _env("TTS_VOICE", "Joanna"))
     llm_model: str = field(default_factory=lambda: _env("LLM_MODEL"))
     llm_effort: str = field(default_factory=lambda: _env("LLM_EFFORT", "low"))
 

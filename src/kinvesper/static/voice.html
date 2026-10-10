@@ -186,11 +186,14 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const key = new URLSearchParams(location.search).get("key") || "";
-  const headers = { "Content-Type": "application/json", ...(key ? { "X-Simulator-Key": key } : {}) };
+  const keyHeader = key ? { "X-Simulator-Key": key } : {};
+  const headers = { "Content-Type": "application/json", ...keyHeader };
   let sid = null, caregiver = "Priya", busy = false, heardByVoice = false;
+  // Speech runs on the server (Whisper in, Amazon Polly out): browsers' built-in speech support varies
+  // too much (Brave and Firefox can't recognise speech; Linux browsers often have no voices).
   const speech = window.speechSynthesis;
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let recognizer = null, listening = false;
+  let serverVoice = false, player = null;
+  let recorder = null, recording = false, audioCtx = null;
 
   const setState = (state, text) => { $("orb").dataset.state = state; $("status").textContent = text; };
   const showError = (text) => { $("error").textContent = text; $("error").hidden = !text; };
@@ -224,15 +227,45 @@
     return wrap;
   }
 
-  function speak(text, then) {
-    if (!$("speakToggle").checked || !speech) { setState("idle", "Tap the mic or type"); then && then(); return; }
+  function stopSpeaking() {
+    if (player) { player.pause(); player = null; }
+    speech && speech.cancel();
+  }
+
+  async function speak(text, then) {
+    let finished = false;
+    const done = () => { if (finished) return; finished = true; setState("idle", "Tap the mic or type"); then && then(); };
+    if (!$("speakToggle").checked) return done();
+    if (serverVoice) {
+      try {
+        const r = await fetch(`/api/voice/sessions/${sid}/speech`, { method: "POST", headers, body: JSON.stringify({ text }) });
+        if (r.ok) {
+          const url = URL.createObjectURL(await r.blob());
+          stopSpeaking();
+          const audio = player = new Audio(url);
+          audio.onplaying = () => setState("speaking", "Speaking…");
+          audio.onended = audio.onerror = () => { URL.revokeObjectURL(url); if (player === audio) player = null; done(); };
+          await audio.play();
+          return;
+        }
+        if (r.status === 503) serverVoice = false;  // no Polly here: use the browser's voice from now on
+      } catch { /* playback blocked or network error: try the browser's voice */ }
+    }
+    browserSpeak(text, done);
+  }
+
+  function browserSpeak(text, done) {
+    if (!speech) return done();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 0.95;
     const voice = speech.getVoices().find((v) => v.lang === "en-US" && /natural|google|samantha/i.test(v.name));
     if (voice) u.voice = voice;
-    u.onstart = () => setState("speaking", "Speaking…");
-    u.onend = u.onerror = () => { setState("idle", "Tap the mic or type"); then && then(); };
+    let started = false;
+    u.onstart = () => { started = true; setState("speaking", "Speaking…"); };
+    u.onend = u.onerror = done;
     speech.speak(u);
+    // Some browsers (often on Linux) have no voices and never start: don't leave the page stuck.
+    setTimeout(() => { if (!started) { speech.cancel(); done(); } }, 2500);
   }
 
   function confirmButtons(msg) {
@@ -251,7 +284,7 @@
     text = text.trim();
     if (!text || !sid || busy) return;
     busy = true; showError("");
-    speech && speech.cancel();
+    stopSpeaking();
     document.querySelectorAll(".quick").forEach((q) => q.remove());
     addMessage("user", text);
     $("text").value = "";
@@ -265,7 +298,7 @@
       });
       if (data.awaiting_confirmation) confirmButtons(msg);
       const voiceTurn = heardByVoice;
-      speak(data.reply, () => { if (data.awaiting_confirmation && voiceTurn) listen(); });
+      speak(data.reply, () => { if (data.awaiting_confirmation && voiceTurn) startRecording(); });
     } catch (e) {
       showError(`Couldn't reach Kinvesper: ${e.message}`);
       setState("idle", "Tap the mic or type");
@@ -274,33 +307,88 @@
     }
   }
 
-  function listen() {
-    if (!recognizer || listening) return;
-    speech && speech.cancel();
-    try { recognizer.start(); } catch { /* already started */ }
-  }
+  // ---- microphone: record, stop on silence, transcribe on the server ----
+  const QUIET_RMS = 0.015, END_SILENCE_MS = 1200, NO_SPEECH_MS = 7000, MAX_MS = 15000;
 
-  function setupRecognition() {
-    if (!Recognition) {
-      $("micNote").textContent = "Voice input needs Chrome or Edge. You can type instead.";
+  async function startRecording() {
+    if (recording || busy || !sid) return;
+    stopSpeaking();
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (e) {
+      $("micNote").textContent = e.name === "NotAllowedError"
+        ? "Microphone blocked. Allow it in the browser's site settings, or type."
+        : `Couldn't open the microphone (${e.name}). You can type instead.`;
       return;
     }
-    recognizer = new Recognition();
-    recognizer.lang = "en-US";
-    recognizer.interimResults = true;
-    recognizer.onstart = () => { listening = true; $("mic").setAttribute("aria-pressed", "true"); setState("listening", "Listening…"); };
-    recognizer.onend = () => {
-      listening = false; $("mic").setAttribute("aria-pressed", "false");
-      if ($("orb").dataset.state === "listening") setState("idle", "Tap the mic or type");
+    $("micNote").textContent = "";
+    const chunks = [];
+    let heard = false;
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());  // release the mic between requests
+      recording = false; $("mic").setAttribute("aria-pressed", "false");
+      if (!heard) return setState("idle", "I didn't hear anything. Tap the mic and speak.");
+      transcribe(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
     };
-    recognizer.onerror = (e) => { if (e.error === "not-allowed") $("micNote").textContent = "Microphone blocked. Allow it in the browser, or type."; };
-    recognizer.onresult = (e) => {
-      const res = e.results[e.results.length - 1];
-      $("text").value = res[0].transcript;
-      if (res.isFinal) { heardByVoice = true; send(res[0].transcript); }
-    };
+    recorder.start();
+    recording = true; $("mic").setAttribute("aria-pressed", "true");
+    setState("listening", "Listening… (tap to stop)");
+
+    // Stop by itself once the person has spoken and then gone quiet.
+    audioCtx = audioCtx || new AudioContext();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    const samples = new Float32Array(analyser.fftSize);
+    const begun = performance.now();
+    let lastSound = begun;
+    const timer = setInterval(() => {
+      if (!recording) { clearInterval(timer); source.disconnect(); return; }
+      analyser.getFloatTimeDomainData(samples);
+      const rms = Math.sqrt(samples.reduce((sum, v) => sum + v * v, 0) / samples.length);
+      const now = performance.now();
+      if (rms > QUIET_RMS) { heard = true; lastSound = now; }
+      if ((heard && now - lastSound > END_SILENCE_MS) || (!heard && now - begun > NO_SPEECH_MS) || now - begun > MAX_MS) {
+        stopRecording();
+      }
+    }, 100);
+  }
+
+  function stopRecording() {
+    if (recorder && recorder.state === "recording") recorder.stop();
+  }
+
+  async function transcribe(blob) {
+    setState("thinking", "Listening back…");
+    try {
+      const r = await fetch(`/api/voice/sessions/${sid}/transcribe`, {
+        method: "POST", headers: { "Content-Type": blob.type, ...keyHeader }, body: blob,
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      if (!data.text) return setState("idle", "I didn't catch that. Tap the mic and try again.");
+      heardByVoice = true;
+      send(data.text);
+    } catch (e) {
+      showError(`Couldn't understand the recording: ${e.message}`);
+      setState("idle", "Tap the mic or type");
+    }
+  }
+
+  function setupMic() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      $("micNote").textContent = window.isSecureContext
+        ? "This browser can't record audio. You can type instead."
+        : "Voice input needs https (or localhost). You can type instead.";
+      return;
+    }
     $("mic").disabled = false;
-    $("mic").onclick = () => (listening ? recognizer.stop() : listen());
+    $("mic").onclick = () => (recording ? stopRecording() : startRecording());
   }
 
   function scenarios() {
@@ -329,7 +417,7 @@
         if (r.ok) {
           for (const a of await r.json()) {
             addMessage("bot update", a.text, { tag: "Update", calls: a.tool_calls });
-            if (!busy && !listening) speak(a.text);
+            if (!busy && !recording) speak(a.text);
           }
         }
       } catch { /* try again next tick */ }
@@ -346,7 +434,9 @@
       const providers = { bedrock: "Claude · Amazon Bedrock", anthropic: "Claude · Claude API", ollama: "Local model · Ollama" };
       $("mode").textContent = data.mode === "claude" ? providers[data.provider] : "Offline keyword router";
       $("text").disabled = $("send").disabled = false;
-      scenarios(); setupRecognition();
+      serverVoice = Boolean(data.server_voice);
+      scenarios();
+      if (data.voice_input) setupMic(); else $("micNote").textContent = "Voice input is off on this server. You can type instead.";
       setState("idle", "Tap the mic or type");
       addMessage("bot", `Hi! I'm your Kinvesper helper. Ask me about your medicines, a suspicious call, or say "tell ${caregiver}…".`);
       pollAnnouncements();

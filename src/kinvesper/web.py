@@ -3,6 +3,8 @@
     GET    /voice                                       the simulator page
     POST   /api/voice/sessions                          start a conversation
     POST   /api/voice/sessions/{sid}/turns {"text"}     one utterance -> spoken reply + tool trace
+    POST   /api/voice/sessions/{sid}/transcribe         recorded audio -> {"text"} (Whisper)
+    POST   /api/voice/sessions/{sid}/speech {"text"}    text -> MP3 (Amazon Polly), 503 = use the browser
     GET    /api/voice/sessions/{sid}/announcements      results of finished background tasks
     DELETE /api/voice/sessions/{sid}                    end a conversation
 
@@ -20,7 +22,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from . import llm
+from . import llm, speech
 from .config import settings
 from .voice import VoiceSessions
 
@@ -76,6 +78,8 @@ def voice_routes(sessions: VoiceSessions) -> list[Route]:
             "provider": settings.llm_provider if llm.enabled() else "none",
             "caregiver": session.caregiver,
             "tools": [t["name"] for t in session.tools],
+            "server_voice": speech.tts_available(),
+            "voice_input": speech.stt_available(),
         })
 
     def lookup(request: Request):
@@ -99,6 +103,37 @@ def voice_routes(sessions: VoiceSessions) -> list[Route]:
         result = await session.turn(text[:MAX_UTTERANCE])
         return JSONResponse(result.model_dump())
 
+    async def transcribe(request: Request) -> Response:
+        session, denied = lookup(request)
+        if denied:
+            return denied
+        audio = await request.body()
+        if not audio:
+            return JSONResponse({"error": "No audio received"}, status_code=400)
+        if len(audio) > speech.MAX_AUDIO_BYTES:
+            return JSONResponse({"error": "That recording is too long"}, status_code=413)
+        try:
+            text = await speech.transcribe(audio, session.speech_hint)
+        except speech.SpeechUnavailable as e:
+            return JSONResponse({"error": str(e)}, status_code=422)
+        return JSONResponse({"text": text[:MAX_UTTERANCE]})
+
+    async def speak(request: Request) -> Response:
+        _, denied = lookup(request)
+        if denied:
+            return denied
+        try:
+            text = str((await request.json()).get("text", "")).strip()
+        except ValueError:
+            text = ""
+        if not text:
+            return JSONResponse({"error": "Nothing to say"}, status_code=400)
+        try:
+            audio = await speech.synthesize(text)
+        except speech.SpeechUnavailable as e:
+            return JSONResponse({"error": str(e)}, status_code=503)
+        return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+
     async def announcements(request: Request) -> Response:
         session, denied = lookup(request)
         if denied:
@@ -117,6 +152,8 @@ def voice_routes(sessions: VoiceSessions) -> list[Route]:
         Route("/voice", voice_page),
         Route("/api/voice/sessions", create, methods=["POST"]),
         Route("/api/voice/sessions/{sid}/turns", turn, methods=["POST"]),
+        Route("/api/voice/sessions/{sid}/transcribe", transcribe, methods=["POST"]),
+        Route("/api/voice/sessions/{sid}/speech", speak, methods=["POST"]),
         Route("/api/voice/sessions/{sid}/announcements", announcements),
         Route("/api/voice/sessions/{sid}", end, methods=["DELETE"]),
     ]

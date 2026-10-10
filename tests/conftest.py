@@ -32,6 +32,8 @@ def _run_server(data_dir, port=None, **extra_env):
         "PORT": str(port),
         "DATA_FILE": str(data_dir / "state.json"),
         "LLM_PROVIDER": "none",
+        "STT_MODEL": "off",  # no Whisper download in tests
+        "TTS_PROVIDER": "browser",  # no AWS calls in tests
         "REFILL_STEP_SECONDS": "0.3",  # long enough for a client polling every 0.5 s to see progress
         **extra_env,
     }

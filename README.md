@@ -63,9 +63,17 @@ Every tool has annotations, a title, an icon and an `outputSchema`, and returns 
 
 ## Voice simulator
 
-Open `/voice` in Chrome or Edge to talk to Kinvesper the way you would to Alexa+: tap the mic
-(Web Speech API for speech-to-text and text-to-speech) or type. Each reply shows the MCP tool calls
-behind it. Scenario buttons cover the demo flows.
+Open `/voice` in any modern browser to talk to Kinvesper the way you would to Alexa+: tap the mic
+and speak (it stops by itself when you pause), or type. Each reply shows the MCP tool calls behind
+it. Scenario buttons cover the demo flows.
+
+- **Speech runs on the server,** because browsers' built-in speech support varies too much (Brave and
+  Firefox can't recognise speech; Linux browsers often have no voices). The page records audio and
+  the server transcribes it with [Whisper](https://github.com/SYSTRAN/faster-whisper) (`STT_MODEL`,
+  default `small.en`, on the CPU, no account needed), primed with the person's, caregiver's and
+  medicines' names so it hears "Atorvastatin" rather than "a tortoise dad in". Replies are spoken
+  with **Amazon Polly** (`TTS_VOICE`, default Joanna); without AWS credentials the page falls back to
+  the browser's own voice. The first run downloads the Whisper model (~250 MB).
 
 - **Brain:** with `LLM_PROVIDER=bedrock` or `anthropic`, Claude runs a tool-use loop over the tools
   it discovers from `/mcp`. With `LLM_PROVIDER=none`, a keyword router picks one tool per utterance,

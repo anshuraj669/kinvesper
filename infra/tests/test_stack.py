@@ -70,6 +70,7 @@ def test_instance_role_least_privilege(template):
             actions.update(acts)
     assert "bedrock-mantle:CreateInference" in actions
     assert "sns:Publish" in actions
+    assert "polly:SynthesizeSpeech" in actions
     assert not any(a.endswith(":*") or a == "*" for a in actions)
 
 
