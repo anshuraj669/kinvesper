@@ -44,8 +44,10 @@ class Settings:
     llm_provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "none"))
     ollama_url: str = field(default_factory=lambda: _env("OLLAMA_URL", "http://localhost:11434"))
 
-    # Voice simulator speech: Whisper model (name, local path, or "off") for speech-to-text; "polly" or
-    # "browser" for text-to-speech (Polly falls back to the browser's voice when it can't be used).
+    # Voice simulator speech. Speech-to-text: "whisper" (local), "transcribe" (Amazon Transcribe) or "off";
+    # STT_MODEL is the Whisper model name or path. Text-to-speech: "polly" or "browser" (Polly falls
+    # back to the browser's voice when it can't be used).
+    stt_provider: str = field(default_factory=lambda: _env("STT_PROVIDER", "whisper"))
     stt_model: str = field(default_factory=lambda: _env("STT_MODEL", "small.en"))
     tts_provider: str = field(default_factory=lambda: _env("TTS_PROVIDER", "polly"))
     tts_voice: str = field(default_factory=lambda: _env("TTS_VOICE", "Joanna"))
@@ -67,6 +69,8 @@ class Settings:
     simulator_key: str = field(default_factory=lambda: _env("SIMULATOR_KEY"))
     # Access key for the caregiver dashboard when OAuth is on (open /dashboard?key=...).
     dashboard_key: str = field(default_factory=lambda: _env("DASHBOARD_KEY"))
+    # Skill ID of the classic Alexa skill bridge (amzn1.ask.skill...); empty = /alexa is off.
+    alexa_skill_id: str = field(default_factory=lambda: _env("ALEXA_SKILL_ID"))
 
     # Care rules
     missed_dose_grace_min: int = field(default_factory=lambda: int(_env("MISSED_DOSE_GRACE_MIN", "60")))

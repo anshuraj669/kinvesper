@@ -27,6 +27,13 @@ def local() -> bool:
     return settings.llm_provider == "ollama"
 
 
+def server_tools() -> list[dict]:
+    """Tools Anthropic runs for us: web search answers questions about today (weather, news, opening hours)."""
+    if settings.llm_provider != "anthropic":
+        return []
+    return [{"type": "web_search_20260209", "name": "web_search", "max_uses": 2}]
+
+
 async def warm_up() -> None:
     """Load a local model into memory before the first real request (the first load can take most of a minute)."""
     if not local():

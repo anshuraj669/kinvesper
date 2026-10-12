@@ -135,8 +135,15 @@ def test_unauthenticated_request_is_challenged(auth_server):
 
     meta = httpx.get(f"{auth_server}/.well-known/oauth-protected-resource/mcp").json()
     assert meta["resource"] == f"{auth_server}/mcp"
-    assert meta["authorization_servers"][0].startswith("https://cognito-idp.")
+    # This server serves the authorization server metadata (Cognito's lacks PKCE S256)
+    assert meta["authorization_servers"] == [f"{auth_server}/"]
     assert "kinvesper/mcp" in meta["scopes_supported"]
+
+    # Alexa+ reads the root path; it must say the same thing
+    root = httpx.get(f"{auth_server}/.well-known/oauth-protected-resource").json()
+    assert root["resource"] == meta["resource"]
+    assert root["authorization_servers"] == meta["authorization_servers"]
+    assert root["scopes_supported"] == meta["scopes_supported"]
 
 
 async def test_service_token_is_accepted(auth_server):
@@ -184,6 +191,22 @@ async def test_jwt_verifier(signer):
     assert await verifier.verify_token(sign(client_id="other-client")) is None  # wrong audience
 
 
+async def test_jwt_verifier_accepts_each_listed_client():
+    """MCP clients and the Alexa+ add-on have their own Cognito app clients."""
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    settings = Settings(oauth_issuer=ISSUER, oauth_audience="mcp-client,alexa-client", oauth_scopes="kinvesper/mcp",
+                        service_token="")
+    verifier = JwtTokenVerifier(settings, jwks_client=_StaticJwks(private.public_key()))
+
+    def token(client_id):
+        claims = {"iss": ISSUER, "exp": int(time.time()) + 300, "client_id": client_id, "scope": "kinvesper/mcp"}
+        return jwt.encode(claims, private, algorithm="RS256")
+
+    assert (await verifier.verify_token(token("mcp-client"))).client_id == "mcp-client"
+    assert (await verifier.verify_token(token("alexa-client"))).client_id == "alexa-client"
+    assert await verifier.verify_token(token("someone-else")) is None
+
+
 async def test_service_token_verifier():
     settings = Settings(oauth_issuer=ISSUER, oauth_scopes="kinvesper/mcp", service_token="s3cret")
     verifier = JwtTokenVerifier(settings, jwks_client=_StaticJwks(None))
@@ -203,6 +226,7 @@ def test_authorization_server_metadata_from_cognito():
     }
     meta = authorization_server_metadata(cognito, ["kinvesper/mcp"])
     assert meta["issuer"] == ISSUER
+    assert authorization_server_metadata(cognito, [], "https://kinvesper.example/")["issuer"] == "https://kinvesper.example/"
     assert meta["authorization_endpoint"].endswith("/oauth2/authorize")
     assert meta["code_challenge_methods_supported"] == ["S256"]
     assert meta["response_types_supported"] == ["code"]

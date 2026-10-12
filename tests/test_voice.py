@@ -1,17 +1,13 @@
 """Phase 3: the voice agent (offline router and Claude loop) and the simulator API."""
 
 import asyncio
-import contextlib
-import dataclasses
 import json
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from mcp.shared.memory import create_connected_server_and_client_session
 
-from kinvesper import mcp_server, voice
-from kinvesper.mcp_server import INSTRUCTIONS, build_server
+from kinvesper import voice
 from kinvesper.voice import VoiceSession, is_yes, route
 
 MEDS = [
@@ -51,19 +47,6 @@ def test_yes_no():
 
 
 # ---------- agent against the real server, in memory ----------
-
-
-@pytest.fixture
-def connect(service, monkeypatch):
-    monkeypatch.setattr(mcp_server, "settings", dataclasses.replace(mcp_server.settings, refill_step_seconds=0.02))
-    server = build_server(service)
-
-    @contextlib.asynccontextmanager
-    async def _connect(elicit):
-        async with create_connected_server_and_client_session(server, elicitation_callback=elicit) as session:
-            yield session, INSTRUCTIONS
-
-    return lambda elicit: _connect(elicit)
 
 
 @pytest.fixture
@@ -165,6 +148,42 @@ async def test_claude_loop_waits_for_spoken_confirmation(connect, monkeypatch):
         await session.close()
 
 
+async def test_claude_answers_anything_with_web_search(connect, monkeypatch):
+    calls = []
+
+    async def fake_create(**params):
+        calls.append(params)
+        if len(calls) == 1:  # the server paused a long search; sending the turn back resumes it
+            assert {"type": "web_search_20260209", "name": "web_search", "max_uses": 2} in params["tools"]
+            return _reply("pause_turn", _block(type="server_tool_use", id="srv_1", name="web_search",
+                                               input={"query": "Kathmandu weather today"}))
+        assert params["messages"][-1]["role"] == "assistant"
+        return _reply("end_turn", _block(type="text", text="It's sunny in Kathmandu, "),
+                      _block(type="text", text="around 24 degrees."))
+
+    monkeypatch.setattr(voice.llm, "enabled", lambda: True)
+    monkeypatch.setattr(voice.llm, "server_tools", lambda: [
+        {"type": "web_search_20260209", "name": "web_search", "max_uses": 2}])
+    monkeypatch.setattr(voice.llm, "create_message", fake_create)
+    session = VoiceSession(connect=connect)
+    await session.start()
+    try:
+        out = await session.turn("What's the weather in Kathmandu today?")
+        assert out.reply == "It's sunny in Kathmandu, around 24 degrees."
+        assert out.tool_calls == [] and len(calls) == 2
+    finally:
+        await session.close()
+
+
+def test_web_search_only_with_the_claude_api(monkeypatch):
+    from kinvesper import llm
+    from kinvesper.config import Settings
+
+    for provider, searches in [("anthropic", True), ("bedrock", False), ("ollama", False), ("none", False)]:
+        monkeypatch.setattr(llm, "settings", Settings(llm_provider=provider))
+        assert bool(llm.server_tools()) is searches
+
+
 async def test_claude_refusal_keeps_history_clean(connect, monkeypatch):
     async def fake_create(**_params):
         return _reply("refusal")
@@ -259,11 +278,16 @@ def test_recent_turns_keeps_tool_calls_with_their_results():
     assert recent_turns(history[:4], 2) == history[:4]
 
 
-def test_speech_hint_names_the_people_and_medicines():
-    from kinvesper.speech import hint_for
+def test_speech_vocabulary_hint_and_name_correction():
+    from kinvesper.speech import Vocabulary
 
-    hint = hint_for("Margaret", "Priya", ["Atorvastatin", "Lisinopril"])
-    assert "Margaret" in hint and "Tell Priya" in hint and "Atorvastatin, Lisinopril" in hint
+    vocab = Vocabulary("Margaret", "Priya", ("Atorvastatin", "Lisinopril", "Metformin"))
+    assert "Margaret" in vocab.hint and "Tell Priya" in vocab.hint and "Atorvastatin, Lisinopril" in vocab.hint
+    assert vocab.correct("Tell Pri I'll call her tonight.") == "Tell Priya I'll call her tonight."
+    assert vocab.correct("order a refill of lisinopril and metformin") == "order a refill of Lisinopril and Metformin"
+    assert vocab.correct("Did I take my atorvastatine?") == "Did I take my Atorvastatin?"
+    # Ordinary words that merely start like a name stay as they are.
+    assert vocab.correct("I met a friend at the price check") == "I met a friend at the price check"
 
 
 def test_polly_without_credentials_falls_back_for_good(monkeypatch):
@@ -282,3 +306,15 @@ def test_polly_without_credentials_falls_back_for_good(monkeypatch):
     with pytest.raises(speech.SpeechUnavailable):
         speech._synthesize("Hello")
     assert not speech.tts_available()
+
+
+def test_available_cpus_respects_container_limit(tmp_path):
+    from kinvesper.speech import available_cpus
+
+    limit = tmp_path / "cpu.max"
+    limit.write_text("100000 100000\n")  # 1 CPU
+    assert available_cpus(str(limit)) == 1
+    limit.write_text("150000 100000\n")  # 1.5 CPUs rounds up
+    assert available_cpus(str(limit)) == min(2, available_cpus(str(tmp_path / "missing")))
+    limit.write_text("max 100000\n")  # no limit: every core this process may run on
+    assert available_cpus(str(limit)) == available_cpus(str(tmp_path / "missing")) >= 1

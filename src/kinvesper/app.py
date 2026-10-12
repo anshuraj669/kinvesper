@@ -1,4 +1,5 @@
-"""HTTP entry point: MCP at /mcp, voice simulator at /voice, caregiver dashboard at /dashboard."""
+"""HTTP entry point: MCP at /mcp, voice simulator at /voice, caregiver dashboard at /dashboard,
+and the public pages the Alexa+ store listing links to (/privacy, /terms)."""
 
 from __future__ import annotations
 
@@ -13,9 +14,11 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from . import scheduler
+from .alexa import alexa_routes
 from .auth import metadata_routes
 from .config import settings
 from .dashboard import dashboard_routes
+from .listing import listing_routes
 from .mcp_server import build_server
 from .seed import seed
 from .service import CareService
@@ -53,6 +56,7 @@ def create_app(service: CareService | None = None, voice: VoiceSessions | None =
 
     routes = [
         Route("/health", health), *metadata_routes(settings), *voice_routes(voice), *dashboard_routes(service),
+        *listing_routes(), *alexa_routes(voice),
         Mount("/", app=mcp_app),
     ]
     app = Starlette(routes=routes, lifespan=lifespan)

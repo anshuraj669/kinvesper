@@ -23,6 +23,8 @@ from constructs import Construct
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCOPE = "kinvesper/mcp"
+# Alexa's account-linking redirect hosts (North America, Europe, Far East, and alexa.amazon.com)
+ALEXA_LINK_HOSTS = ("pitangui.amazon.com", "layla.amazon.com", "alexa.amazon.co.jp", "alexa.amazon.com")
 
 
 class KinvesperStack(cdk.Stack):
@@ -34,11 +36,14 @@ class KinvesperStack(cdk.Stack):
         public_url: str = "",
         care_tz: str = "UTC",
         caregiver_phone: str = "",
+        caregiver_email: str = "",
         ops_email: str = "",
         llm_provider: str = "bedrock",
         llm_model: str = "anthropic.claude-opus-5-5",
         ollama_url: str = "",
         callback_urls: list[str] | None = None,
+        alexa_vendor_id: str = "",
+        alexa_skill_id: str = "",
         retain_data: bool = True,
         **kwargs,
     ) -> None:
@@ -55,10 +60,12 @@ class KinvesperStack(cdk.Stack):
             removal_policy=removal,
         )
 
-        # ---- caregiver alerts by SMS
+        # ---- caregiver alerts by SMS and/or email (email needs no SMS sandbox or spend limit)
         alerts = sns.Topic(self, "CaregiverAlerts", display_name="Kinvesper")
         if caregiver_phone:
             alerts.add_subscription(subs.SmsSubscription(caregiver_phone))
+        if caregiver_email:
+            alerts.add_subscription(subs.EmailSubscription(caregiver_email))
 
         # ---- OAuth 2.1 authorization server for /mcp
         users = cognito.UserPool(
@@ -83,6 +90,24 @@ class KinvesperStack(cdk.Stack):
             supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
             prevent_user_existence_errors=True,
         )
+        clients = [client]
+        alexa_client = None
+        if alexa_vendor_id:
+            # Alexa+ account linking: a confidential client (Alexa sends the secret to the token
+            # endpoint) with every regional Alexa redirect URL, or linking fails outside one region.
+            alexa_client = users.add_client(
+                "AlexaClient",
+                generate_secret=True,
+                o_auth=cognito.OAuthSettings(
+                    flows=cognito.OAuthFlows(authorization_code_grant=True),
+                    scopes=[cognito.OAuthScope.resource_server(resource_server, mcp_scope), cognito.OAuthScope.OPENID],
+                    callback_urls=[f"https://{host}/api/skill/link/{alexa_vendor_id}" for host in ALEXA_LINK_HOSTS],
+                ),
+                supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
+                prevent_user_existence_errors=True,
+                refresh_token_validity=cdk.Duration.days(365),  # don't make an older person relink every month
+            )
+            clients.append(alexa_client)
         domain = users.add_domain("Login", cognito_domain=cognito.CognitoDomainOptions(
             domain_prefix=f"kinvesper-{cdk.Aws.ACCOUNT_ID}"))
         issuer = f"https://cognito-idp.{self.region}.amazonaws.com/{users.user_pool_id}"
@@ -98,11 +123,17 @@ class KinvesperStack(cdk.Stack):
         simulator_key = secret("SimulatorKey", "voice simulator access key (/voice?key=...)")
         dashboard_key = secret("DashboardKey", "caregiver dashboard access key (/dashboard?key=...)")
         secrets = {"SERVICE_TOKEN": service_token, "SIMULATOR_KEY": simulator_key, "DASHBOARD_KEY": dashboard_key}
+        claude_key = None
+        if llm_provider == "anthropic":
+            # Starts as a placeholder (the voice agent falls back to its keyword router until the key
+            # works); scripts/set_claude_key.sh stores the real key and restarts the service.
+            claude_key = secret("ClaudeApiKey", "Claude API key (set it with scripts/set_claude_key.sh)")
+            secrets["ANTHROPIC_API_KEY"] = claude_key
 
         # ---- container image, built from the repo's Dockerfile and pushed to ECR by cdk deploy
         image = ecr_assets.DockerImageAsset(
             self, "Image", directory=str(REPO_ROOT), platform=ecr_assets.Platform.LINUX_AMD64,
-            exclude=[".git", ".venv", ".idea", ".env", "data", "infra", "web", "tests", "**/__pycache__", "cdk.out"],
+            exclude=[".git", ".venv", ".idea", ".env", "data", "infra", "web", "tests", "alexa", "**/__pycache__", "cdk.out"],
         )
 
         # ---- IAM: App Runner pulls the image; the app gets only what it uses
@@ -115,8 +146,8 @@ class KinvesperStack(cdk.Stack):
         for s in secrets.values():
             s.grant_read(instance_role)
         instance_role.add_to_policy(iam.PolicyStatement(
-            sid="SpokenReplies",  # Amazon Polly voice for the voice simulator
-            actions=["polly:SynthesizeSpeech"],
+            sid="VoiceSimulatorSpeech",  # Amazon Transcribe hears the voice simulator, Amazon Polly speaks its replies
+            actions=["transcribe:StartStreamTranscription", "polly:SynthesizeSpeech"],
             resources=["*"],
         ))
         if llm_provider == "bedrock":
@@ -135,13 +166,16 @@ class KinvesperStack(cdk.Stack):
             "LLM_MODEL": llm_model,
             "SNS_TOPIC_ARN": alerts.topic_arn,
             "OAUTH_ISSUER": issuer,
-            "OAUTH_AUDIENCE": client.user_pool_client_id,
+            "OAUTH_AUDIENCE": ",".join(c.user_pool_client_id for c in clients),
             "OAUTH_SCOPES": SCOPE,
             "SCHEDULER_INTERVAL_S": "0",  # App Runner idles the CPU between requests: EventBridge drives the checks
+            "STT_PROVIDER": "transcribe",  # Whisper takes ~8 s per request on App Runner's CPU; Transcribe ~1 s
         }
         if public_url:
             env["PUBLIC_URL"] = public_url.rstrip("/")
-        if llm_provider == "bedrock":
+        if alexa_skill_id:
+            env["ALEXA_SKILL_ID"] = alexa_skill_id  # turns on the classic skill bridge at /alexa
+        if llm_provider == "bedrock" or (llm_provider == "anthropic" and not llm_model.startswith("anthropic.")):
             env["LLM_MODEL"] = llm_model
         else:
             del env["LLM_MODEL"]  # each provider has its own default model
@@ -210,6 +244,7 @@ class KinvesperStack(cdk.Stack):
 
         # ---- outputs
         out = lambda name, value, desc: cdk.CfnOutput(self, name, value=value, description=desc)  # noqa: E731
+        out("ServiceArn", service.attr_service_arn, "App Runner service")
         out("ServiceUrl", url, "Pass as -c publicUrl=... on the next deploy")
         out("McpUrl", f"{url}/mcp", "MCP endpoint (Streamable HTTP, OAuth 2.1)")
         out("VoiceSimulator", f"{url}/voice?key=<SimulatorKey>", "Voice simulator")
@@ -217,9 +252,14 @@ class KinvesperStack(cdk.Stack):
         out("SimulatorKeySecret", simulator_key.secret_arn, "aws secretsmanager get-secret-value --secret-id <arn>")
         out("DashboardKeySecret", dashboard_key.secret_arn, "aws secretsmanager get-secret-value --secret-id <arn>")
         out("ServiceTokenSecret", service_token.secret_arn, "Bearer token that skips OAuth (simulators)")
+        if claude_key:
+            out("ClaudeApiKeySecret", claude_key.secret_arn, "Set with scripts/set_claude_key.sh")
         out("OAuthIssuer", issuer, "Cognito issuer")
         out("OAuthClientId", client.user_pool_client_id, "Public OAuth client (PKCE)")
+        if alexa_client:
+            out("AlexaClientId", alexa_client.user_pool_client_id,
+                "Alexa+ account linking client; its secret is in the Cognito console (or describe-user-pool-client)")
         out("OAuthLogin", domain.base_url(), "Cognito hosted login")
         out("UserPoolId", users.user_pool_id, "Create caregiver logins here")
         out("TableName", table.table_name, "DynamoDB table")
-        out("AlertsTopic", alerts.topic_arn, "Caregiver SMS topic")
+        out("AlertsTopic", alerts.topic_arn, "Caregiver alerts topic (SMS/email)")

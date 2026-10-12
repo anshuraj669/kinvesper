@@ -18,7 +18,6 @@ from mcp.types import (
     ClientCapabilities,
     ElicitationCapability,
     ErrorData,
-    TextContent,
     Tool,
     ToolAnnotations,
     ToolExecution,

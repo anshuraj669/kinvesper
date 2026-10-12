@@ -1,0 +1,156 @@
+{
+  "manifest": {
+    "manifestVersion": "1.0",
+    "publishingInformation": {
+      "locales": {
+        "en-US": {
+          "name": "Kinvesper",
+          "summary": "Medication check-ins, scam checks and family updates for older adults who live alone.",
+          "description": "Kinvesper is a voice companion for an older adult who lives alone, and for the family member who looks after them.\n\nAsk whether you took your pills, or say you just took them. Describe a suspicious call and hear whether it looks like a scam. Ask Kinvesper to tell your daughter something, and it checks with you before sending the message. Missed doses, worrying symptoms and long silences are texted to your caregiver.\n\nKinvesper is not a medical device and does not contact emergency services. In an emergency, call your local emergency number.",
+          "examplePhrases": [
+            "Alexa, open kin vesper",
+            "Alexa, ask kin vesper did I take my pills",
+            "Alexa, tell kin vesper I just took my Lisinopril"
+          ],
+          "keywords": [
+            "medication",
+            "reminder",
+            "caregiver",
+            "elderly",
+            "scam",
+            "family"
+          ],
+          "smallIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-108.png",
+          "largeIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-512.png"
+        },
+        "en-IN": {
+          "name": "Kinvesper",
+          "summary": "Medication check-ins, scam checks and family updates for older adults who live alone.",
+          "description": "Kinvesper is a voice companion for an older adult who lives alone, and for the family member who looks after them.\n\nAsk whether you took your pills, or say you just took them. Describe a suspicious call and hear whether it looks like a scam. Ask Kinvesper to tell your daughter something, and it checks with you before sending the message. Missed doses, worrying symptoms and long silences are texted to your caregiver.\n\nKinvesper is not a medical device and does not contact emergency services. In an emergency, call your local emergency number.",
+          "examplePhrases": [
+            "Alexa, open kin vesper",
+            "Alexa, ask kin vesper did I take my pills",
+            "Alexa, tell kin vesper I just took my Lisinopril"
+          ],
+          "keywords": [
+            "medication",
+            "reminder",
+            "caregiver",
+            "elderly",
+            "scam",
+            "family"
+          ],
+          "smallIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-108.png",
+          "largeIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-512.png"
+        },
+        "en-GB": {
+          "name": "Kinvesper",
+          "summary": "Medication check-ins, scam checks and family updates for older adults who live alone.",
+          "description": "Kinvesper is a voice companion for an older adult who lives alone, and for the family member who looks after them.\n\nAsk whether you took your pills, or say you just took them. Describe a suspicious call and hear whether it looks like a scam. Ask Kinvesper to tell your daughter something, and it checks with you before sending the message. Missed doses, worrying symptoms and long silences are texted to your caregiver.\n\nKinvesper is not a medical device and does not contact emergency services. In an emergency, call your local emergency number.",
+          "examplePhrases": [
+            "Alexa, open kin vesper",
+            "Alexa, ask kin vesper did I take my pills",
+            "Alexa, tell kin vesper I just took my Lisinopril"
+          ],
+          "keywords": [
+            "medication",
+            "reminder",
+            "caregiver",
+            "elderly",
+            "scam",
+            "family"
+          ],
+          "smallIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-108.png",
+          "largeIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-512.png"
+        },
+        "en-CA": {
+          "name": "Kinvesper",
+          "summary": "Medication check-ins, scam checks and family updates for older adults who live alone.",
+          "description": "Kinvesper is a voice companion for an older adult who lives alone, and for the family member who looks after them.\n\nAsk whether you took your pills, or say you just took them. Describe a suspicious call and hear whether it looks like a scam. Ask Kinvesper to tell your daughter something, and it checks with you before sending the message. Missed doses, worrying symptoms and long silences are texted to your caregiver.\n\nKinvesper is not a medical device and does not contact emergency services. In an emergency, call your local emergency number.",
+          "examplePhrases": [
+            "Alexa, open kin vesper",
+            "Alexa, ask kin vesper did I take my pills",
+            "Alexa, tell kin vesper I just took my Lisinopril"
+          ],
+          "keywords": [
+            "medication",
+            "reminder",
+            "caregiver",
+            "elderly",
+            "scam",
+            "family"
+          ],
+          "smallIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-108.png",
+          "largeIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-512.png"
+        },
+        "en-AU": {
+          "name": "Kinvesper",
+          "summary": "Medication check-ins, scam checks and family updates for older adults who live alone.",
+          "description": "Kinvesper is a voice companion for an older adult who lives alone, and for the family member who looks after them.\n\nAsk whether you took your pills, or say you just took them. Describe a suspicious call and hear whether it looks like a scam. Ask Kinvesper to tell your daughter something, and it checks with you before sending the message. Missed doses, worrying symptoms and long silences are texted to your caregiver.\n\nKinvesper is not a medical device and does not contact emergency services. In an emergency, call your local emergency number.",
+          "examplePhrases": [
+            "Alexa, open kin vesper",
+            "Alexa, ask kin vesper did I take my pills",
+            "Alexa, tell kin vesper I just took my Lisinopril"
+          ],
+          "keywords": [
+            "medication",
+            "reminder",
+            "caregiver",
+            "elderly",
+            "scam",
+            "family"
+          ],
+          "smallIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-108.png",
+          "largeIconUri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-512.png"
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": [
+        "US",
+        "IN",
+        "GB",
+        "CA",
+        "AU"
+      ],
+      "category": "HEALTH_AND_FITNESS",
+      "testingInstructions": "Say: open kin vesper. Then: did I take my pills; I just took my Metformin; someone called saying my grandson needs bail money in gift cards; tell Priya I'm fine (then yes)."
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/alexa",
+          "sslCertificateType": "Wildcard"
+        }
+      }
+    },
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": false,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false,
+      "locales": {
+        "en-US": {
+          "privacyPolicyUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/privacy",
+          "termsOfUseUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/terms"
+        },
+        "en-IN": {
+          "privacyPolicyUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/privacy",
+          "termsOfUseUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/terms"
+        },
+        "en-GB": {
+          "privacyPolicyUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/privacy",
+          "termsOfUseUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/terms"
+        },
+        "en-CA": {
+          "privacyPolicyUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/privacy",
+          "termsOfUseUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/terms"
+        },
+        "en-AU": {
+          "privacyPolicyUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/privacy",
+          "termsOfUseUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/terms"
+        }
+      }
+    }
+  }
+}

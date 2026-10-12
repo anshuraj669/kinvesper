@@ -1,0 +1,451 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "kin vesper",
+      "intents": [
+        {
+          "name": "CatchAllIntent",
+          "slots": [
+            {
+              "name": "utterance",
+              "type": "KinvesperRequest"
+            }
+          ],
+          "samples": [
+            "{utterance}"
+          ]
+        },
+        {
+          "name": "AMAZON.YesIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NoIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ],
+      "types": [
+        {
+          "name": "KinvesperRequest",
+          "values": [
+            {
+              "name": {
+                "value": "did I take my pills"
+              }
+            },
+            {
+              "name": {
+                "value": "did I take my pills this morning"
+              }
+            },
+            {
+              "name": {
+                "value": "what pills do I need today"
+              }
+            },
+            {
+              "name": {
+                "value": "what medicine is next"
+              }
+            },
+            {
+              "name": {
+                "value": "did I take my blood pressure pill"
+              }
+            },
+            {
+              "name": {
+                "value": "have I had my Metformin"
+              }
+            },
+            {
+              "name": {
+                "value": "when is my next dose"
+              }
+            },
+            {
+              "name": {
+                "value": "what are my medications"
+              }
+            },
+            {
+              "name": {
+                "value": "I just took my Lisinopril"
+              }
+            },
+            {
+              "name": {
+                "value": "I took my Metformin"
+              }
+            },
+            {
+              "name": {
+                "value": "I took my morning pills"
+              }
+            },
+            {
+              "name": {
+                "value": "I just took my Atorvastatin"
+              }
+            },
+            {
+              "name": {
+                "value": "I've taken my Levothyroxine"
+              }
+            },
+            {
+              "name": {
+                "value": "I took all my pills"
+              }
+            },
+            {
+              "name": {
+                "value": "someone called saying my grandson is in jail"
+              }
+            },
+            {
+              "name": {
+                "value": "a man called asking for gift cards"
+              }
+            },
+            {
+              "name": {
+                "value": "I got an email saying I won the lottery"
+              }
+            },
+            {
+              "name": {
+                "value": "someone says my computer has a virus"
+              }
+            },
+            {
+              "name": {
+                "value": "a caller says my bank account is locked"
+              }
+            },
+            {
+              "name": {
+                "value": "is this call a scam"
+              }
+            },
+            {
+              "name": {
+                "value": "the IRS called and wants payment today"
+              }
+            },
+            {
+              "name": {
+                "value": "tell Priya I'm fine"
+              }
+            },
+            {
+              "name": {
+                "value": "tell Priya I'll call her tonight"
+              }
+            },
+            {
+              "name": {
+                "value": "let Priya know I'm going to the doctor"
+              }
+            },
+            {
+              "name": {
+                "value": "message Priya that I'm home"
+              }
+            },
+            {
+              "name": {
+                "value": "text Priya I love her"
+              }
+            },
+            {
+              "name": {
+                "value": "I'm feeling fine today"
+              }
+            },
+            {
+              "name": {
+                "value": "I'm feeling a bit lonely"
+              }
+            },
+            {
+              "name": {
+                "value": "I feel dizzy"
+              }
+            },
+            {
+              "name": {
+                "value": "I didn't sleep well"
+              }
+            },
+            {
+              "name": {
+                "value": "I'm feeling great"
+              }
+            },
+            {
+              "name": {
+                "value": "I'm tired today"
+              }
+            },
+            {
+              "name": {
+                "value": "my knee hurts"
+              }
+            },
+            {
+              "name": {
+                "value": "order a refill of my Lisinopril"
+              }
+            },
+            {
+              "name": {
+                "value": "I'm running out of Metformin"
+              }
+            },
+            {
+              "name": {
+                "value": "can you order more of my cholesterol pills"
+              }
+            },
+            {
+              "name": {
+                "value": "please deliver my refill"
+              }
+            },
+            {
+              "name": {
+                "value": "I need a new prescription"
+              }
+            },
+            {
+              "name": {
+                "value": "I fell down"
+              }
+            },
+            {
+              "name": {
+                "value": "I need help"
+              }
+            },
+            {
+              "name": {
+                "value": "I have chest pain"
+              }
+            },
+            {
+              "name": {
+                "value": "how was my week"
+              }
+            },
+            {
+              "name": {
+                "value": "how was mom's week"
+              }
+            },
+            {
+              "name": {
+                "value": "give me a summary"
+              }
+            },
+            {
+              "name": {
+                "value": "what's the weather today"
+              }
+            },
+            {
+              "name": {
+                "value": "will it rain tomorrow"
+              }
+            },
+            {
+              "name": {
+                "value": "what's the news today"
+              }
+            },
+            {
+              "name": {
+                "value": "what time is it in London"
+              }
+            },
+            {
+              "name": {
+                "value": "what's the capital of Japan"
+              }
+            },
+            {
+              "name": {
+                "value": "how far is the moon"
+              }
+            },
+            {
+              "name": {
+                "value": "who won the cricket match last night"
+              }
+            },
+            {
+              "name": {
+                "value": "tell me a joke"
+              }
+            },
+            {
+              "name": {
+                "value": "tell me a story"
+              }
+            },
+            {
+              "name": {
+                "value": "tell me something interesting"
+              }
+            },
+            {
+              "name": {
+                "value": "sing me a song"
+              }
+            },
+            {
+              "name": {
+                "value": "how do I make chicken soup"
+              }
+            },
+            {
+              "name": {
+                "value": "give me a recipe for dal"
+              }
+            },
+            {
+              "name": {
+                "value": "how many grams in a pound"
+              }
+            },
+            {
+              "name": {
+                "value": "what's twenty percent of eighty"
+              }
+            },
+            {
+              "name": {
+                "value": "convert fifty dollars to rupees"
+              }
+            },
+            {
+              "name": {
+                "value": "how do you spell necessary"
+              }
+            },
+            {
+              "name": {
+                "value": "what does serendipity mean"
+              }
+            },
+            {
+              "name": {
+                "value": "who was Mahatma Gandhi"
+              }
+            },
+            {
+              "name": {
+                "value": "when is Diwali this year"
+              }
+            },
+            {
+              "name": {
+                "value": "what should I cook for dinner"
+              }
+            },
+            {
+              "name": {
+                "value": "how do I video call my granddaughter"
+              }
+            },
+            {
+              "name": {
+                "value": "remind me how to use the TV remote"
+              }
+            },
+            {
+              "name": {
+                "value": "what's a good exercise for my back"
+              }
+            },
+            {
+              "name": {
+                "value": "is it safe to eat eggs every day"
+              }
+            },
+            {
+              "name": {
+                "value": "what's good for a cold"
+              }
+            },
+            {
+              "name": {
+                "value": "give me a word puzzle"
+              }
+            },
+            {
+              "name": {
+                "value": "let's play a quiz"
+              }
+            },
+            {
+              "name": {
+                "value": "what day is it today"
+              }
+            },
+            {
+              "name": {
+                "value": "how old is the Taj Mahal"
+              }
+            },
+            {
+              "name": {
+                "value": "what's on TV tonight"
+              }
+            },
+            {
+              "name": {
+                "value": "read me a poem"
+              }
+            },
+            {
+              "name": {
+                "value": "what's the best way to sleep better"
+              }
+            },
+            {
+              "name": {
+                "value": "help me write a birthday card"
+              }
+            }
+          ]
+        }
+      ],
+      "modelConfiguration": {
+        "fallbackIntentSensitivity": {
+          "level": "LOW"
+        }
+      }
+    }
+  }
+}

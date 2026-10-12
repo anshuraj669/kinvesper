@@ -3,7 +3,7 @@
     GET    /voice                                       the simulator page
     POST   /api/voice/sessions                          start a conversation
     POST   /api/voice/sessions/{sid}/turns {"text"}     one utterance -> spoken reply + tool trace
-    POST   /api/voice/sessions/{sid}/transcribe         recorded audio -> {"text"} (Whisper)
+    POST   /api/voice/sessions/{sid}/transcribe         recorded audio -> {"text"} (Whisper or Amazon Transcribe)
     POST   /api/voice/sessions/{sid}/speech {"text"}    text -> MP3 (Amazon Polly), 503 = use the browser
     GET    /api/voice/sessions/{sid}/announcements      results of finished background tasks
     DELETE /api/voice/sessions/{sid}                    end a conversation
@@ -113,7 +113,7 @@ def voice_routes(sessions: VoiceSessions) -> list[Route]:
         if len(audio) > speech.MAX_AUDIO_BYTES:
             return JSONResponse({"error": "That recording is too long"}, status_code=413)
         try:
-            text = await speech.transcribe(audio, session.speech_hint)
+            text = await speech.transcribe(audio, session.vocabulary)
         except speech.SpeechUnavailable as e:
             return JSONResponse({"error": str(e)}, status_code=422)
         return JSONResponse({"text": text[:MAX_UTTERANCE]})

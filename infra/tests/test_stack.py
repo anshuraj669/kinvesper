@@ -42,6 +42,7 @@ def test_cloud_configuration(template):
     assert env["STORE"] == "dynamodb"
     assert env["LLM_PROVIDER"] == "bedrock"
     assert env["SCHEDULER_INTERVAL_S"] == "0"
+    assert env["STT_PROVIDER"] == "transcribe"
     assert env["OAUTH_SCOPES"] == "kinvesper/mcp"
     assert env["PUBLIC_URL"] == "https://abc.us-east-1.awsapprunner.com"
 
@@ -71,6 +72,7 @@ def test_instance_role_least_privilege(template):
     assert "bedrock-mantle:CreateInference" in actions
     assert "sns:Publish" in actions
     assert "polly:SynthesizeSpeech" in actions
+    assert "transcribe:StartStreamTranscription" in actions
     assert not any(a.endswith(":*") or a == "*" for a in actions)
 
 
@@ -94,6 +96,12 @@ def test_checks_run_every_five_minutes_with_secret_key(template):
 def test_sms_subscription_only_when_phone_given(template):
     template.resource_count_is("AWS::SNS::Subscription", 1)
     synth().resource_count_is("AWS::SNS::Subscription", 0)
+
+
+def test_email_subscription_when_email_given():
+    t = synth(caregiver_email="care@example.com")
+    t.resource_count_is("AWS::SNS::Subscription", 1)
+    t.has_resource_properties("AWS::SNS::Subscription", {"Protocol": "email", "Endpoint": "care@example.com"})
 
 
 def test_first_deploy_without_public_url():
@@ -123,5 +131,38 @@ def test_ollama_provider_without_bedrock():
     assert not any(a.startswith("bedrock") for a in _actions(local))
 
 
+def test_claude_api_key_comes_from_secrets_manager():
+    cloud = synth(llm_provider="anthropic")
+    env = _env(cloud)
+    assert env["LLM_PROVIDER"] == "anthropic"
+    assert "LLM_MODEL" not in env  # the Bedrock model ID default doesn't apply; the app picks its own
+    assert "ANTHROPIC_API_KEY" in _env(cloud, "RuntimeEnvironmentSecrets")
+    assert "ANTHROPIC_API_KEY" not in env
+    assert not any(a.startswith("bedrock") for a in _actions(cloud))
+    assert "ClaudeApiKeySecret" in cloud.find_outputs("*")
+    assert _env(synth(llm_provider="anthropic", llm_model="claude-sonnet-5-5"))["LLM_MODEL"] == "claude-sonnet-5-5"
+    assert "ClaudeApiKeySecret" not in synth(llm_provider="none").find_outputs("*")
+
+
 def test_destroy_mode():
     synth(retain_data=False).has_resource("AWS::DynamoDB::GlobalTable", {"DeletionPolicy": "Delete"})
+
+
+def test_alexa_client_only_with_vendor_id(template):
+    assert len(template.find_resources("AWS::Cognito::UserPoolClient")) == 1
+
+    linked = synth(alexa_vendor_id="M3IHEJ1OZMSGZ3")
+    clients = linked.find_resources("AWS::Cognito::UserPoolClient")
+    alexa = next(c["Properties"] for c in clients.values() if c["Properties"].get("GenerateSecret"))
+    callbacks = alexa["CallbackURLs"]
+    assert "https://pitangui.amazon.com/api/skill/link/M3IHEJ1OZMSGZ3" in callbacks
+    assert len(callbacks) == 4  # every regional Alexa redirect URL
+    assert alexa["AllowedOAuthFlows"] == ["code"]
+    # The app accepts tokens from both clients
+    audience = str(_env(linked)["OAUTH_AUDIENCE"])
+    assert all(f"'Ref': '{logical_id}'" in audience for logical_id in clients)
+
+
+def test_skill_bridge_only_with_skill_id(template):
+    assert "ALEXA_SKILL_ID" not in _env(template)
+    assert _env(synth(alexa_skill_id="amzn1.ask.skill.x"))["ALEXA_SKILL_ID"] == "amzn1.ask.skill.x"

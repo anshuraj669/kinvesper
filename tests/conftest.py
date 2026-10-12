@@ -1,3 +1,5 @@
+import contextlib
+import dataclasses
 import os
 import socket
 import subprocess
@@ -6,7 +8,10 @@ import time
 
 import httpx
 import pytest
+from mcp.shared.memory import create_connected_server_and_client_session
 
+from kinvesper import mcp_server
+from kinvesper.mcp_server import INSTRUCTIONS, build_server
 from kinvesper.seed import seed
 from kinvesper.service import CareService
 from kinvesper.store import JsonStore
@@ -17,6 +22,20 @@ def service(tmp_path) -> CareService:
     store = JsonStore(str(tmp_path / "state.json"))
     seed(store)
     return CareService(store)
+
+
+@pytest.fixture
+def connect(service, monkeypatch):
+    """Voice sessions talk to the real MCP server, in memory."""
+    monkeypatch.setattr(mcp_server, "settings", dataclasses.replace(mcp_server.settings, refill_step_seconds=0.02))
+    server = build_server(service)
+
+    @contextlib.asynccontextmanager
+    async def _connect(elicit):
+        async with create_connected_server_and_client_session(server, elicitation_callback=elicit) as session:
+            yield session, INSTRUCTIONS
+
+    return lambda elicit: _connect(elicit)
 
 
 def _free_port() -> int:
@@ -32,7 +51,7 @@ def _run_server(data_dir, port=None, **extra_env):
         "PORT": str(port),
         "DATA_FILE": str(data_dir / "state.json"),
         "LLM_PROVIDER": "none",
-        "STT_MODEL": "off",  # no Whisper download in tests
+        "STT_PROVIDER": "off",  # no Whisper download or AWS calls in tests
         "TTS_PROVIDER": "browser",  # no AWS calls in tests
         "REFILL_STEP_SECONDS": "0.3",  # long enough for a client polling every 0.5 s to see progress
         **extra_env,

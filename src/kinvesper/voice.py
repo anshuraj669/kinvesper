@@ -60,6 +60,10 @@ Everything you write is spoken aloud by a speaker:
 - Use the tools for anything about medications, doses, scams, feelings, family or refills. Never
   guess medical facts or the medication schedule.
 - Prefer the tool's `message` or `spoken_summary`, in your own gentle words.
+- Answer anything else too, like any home assistant: facts, how-to, recipes, words, maths, stories,
+  a joke. Use web search when the answer depends on today (weather, news, scores, opening hours) and
+  you have it; otherwise say what you know and that it may be out of date.
+- Health worries still go through the tools: symptoms to daily_check_in, emergencies to emergency_help.
 - Lines starting with [Update] are background events (like a finished refill). Mention them briefly.
 """
 
@@ -211,9 +215,14 @@ class VoiceSession:
     # ----- connection lifecycle -----
 
     @property
-    def speech_hint(self) -> str:
+    def awaiting_confirmation(self) -> bool:
+        """The server asked a yes/no question; the next utterance answers it."""
+        return self._pending is not None
+
+    @property
+    def vocabulary(self) -> speech.Vocabulary:
         """Names speech-to-text should expect: the person, their caregiver and their medicines."""
-        return speech.hint_for(self.patient, self.caregiver, [m["name"] for m in self.meds])
+        return speech.Vocabulary(self.patient, self.caregiver, tuple(m["name"] for m in self.meds))
 
     async def start(self) -> None:
         """Open the MCP connection in a long-lived task (its context managers must enter and exit there)."""
@@ -227,7 +236,8 @@ class VoiceSession:
             async with self.connect(self._on_elicit) as (session, instructions):
                 self.mcp = session
                 listed = (await session.list_tools()).tools
-                self.tools = [{"name": t.name, "description": t.description or "", "input_schema": t.inputSchema} for t in listed]
+                self.tools = [{"name": t.name, "description": t.description or "", "input_schema": t.inputSchema}
+                              for t in listed] + llm.server_tools()
                 self.task_tools = {t.name for t in listed if t.execution and t.execution.taskSupport in ("optional", "required")}
                 profile = json.loads((await session.read_resource("care://profile")).contents[0].text)
                 self.meds = json.loads((await session.read_resource("care://medications")).contents[0].text)
@@ -337,6 +347,8 @@ class VoiceSession:
                 self.history.pop()
                 return "I'm sorry, I can't help with that one."
             self.history.append({"role": "assistant", "content": response.content})
+            if response.stop_reason == "pause_turn":  # a long web search: send it back and the server resumes
+                continue
             uses = [b for b in response.content if b.type == "tool_use"]
             if response.stop_reason != "tool_use" or not uses:
                 return llm.text_of(response) or "Okay."

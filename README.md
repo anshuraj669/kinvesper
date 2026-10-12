@@ -69,11 +69,14 @@ it. Scenario buttons cover the demo flows.
 
 - **Speech runs on the server,** because browsers' built-in speech support varies too much (Brave and
   Firefox can't recognise speech; Linux browsers often have no voices). The page records audio and
-  the server transcribes it with [Whisper](https://github.com/SYSTRAN/faster-whisper) (`STT_MODEL`,
-  default `small.en`, on the CPU, no account needed), primed with the person's, caregiver's and
-  medicines' names so it hears "Atorvastatin" rather than "a tortoise dad in". Replies are spoken
-  with **Amazon Polly** (`TTS_VOICE`, default Joanna); without AWS credentials the page falls back to
-  the browser's own voice. The first run downloads the Whisper model (~250 MB).
+  the server turns it into text (`STT_PROVIDER`): locally with
+  [Whisper](https://github.com/SYSTRAN/faster-whisper) (`STT_MODEL`, default `small.en`, on the CPU,
+  no account needed, about a second), and in the cloud with **Amazon Transcribe** (about a second;
+  Whisper takes ~8 s on App Runner's CPU). Whisper is primed with the person's, caregiver's and
+  medicines' names, and both correct near-misses of them ("Tell Pri" becomes "Tell Priya").
+  Replies are spoken with **Amazon Polly** (`TTS_VOICE`, default Joanna); without AWS credentials
+  the page falls back to the browser's own voice. The first local run downloads the Whisper model
+  (~250 MB).
 
 - **Brain:** with `LLM_PROVIDER=bedrock` or `anthropic`, Claude runs a tool-use loop over the tools
   it discovers from `/mcp`. With `LLM_PROVIDER=none`, a keyword router picks one tool per utterance,
@@ -86,6 +89,10 @@ it. Scenario buttons cover the demo flows.
   and Claude hears about it on the next turn.
 - **Access:** open when OAuth is off. With OAuth on it needs `SERVICE_TOKEN` and `SIMULATOR_KEY`
   (`/voice?key=...`), otherwise it is switched off.
+
+### Connecting to Alexa+
+
+See [alexa/README.md](alexa/README.md): the add-on manifest, account linking and the steps to deploy it.
 
 ### Testing with an external Alexa+ simulator
 

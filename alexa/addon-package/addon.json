@@ -1,0 +1,81 @@
+{
+  "manifestVersion": "1.0",
+  "storeListing": {
+    "distributionCountries": [
+      "US"
+    ],
+    "locales": {
+      "en-US": {
+        "name": {
+          "value": "Kinvesper"
+        },
+        "shortDescription": "Medication check-ins, scam checks and family updates for older adults who live alone, by voice.",
+        "fullDescription": "Kinvesper is a voice companion for an older adult who lives alone, and for the family member who looks after them.\n\nAsk whether you took your pills and Kinvesper checks today's doses. Say you just took them and it logs them. Describe a suspicious call or email and it tells you whether it looks like a scam, and why. Ask it to tell your daughter you're fine, and it confirms the message with you before sending it.\n\nKinvesper also watches out when nobody asks: if a dose is missed, a worrying symptom comes up, or the house has been quiet for too long, your caregiver gets a text message. Refills can be requested from your pharmacy by voice, and the caregiver gets a weekly summary.\n\nKinvesper is not a medical device and does not contact emergency services. In an emergency, call 911.",
+        "examplePhrases": [
+          "Did I take my pills this morning?",
+          "Tell Priya I'm feeling fine today",
+          "Someone called saying my grandson needs bail money, is that a scam?"
+        ],
+        "privacyAndCompliance": {
+          "privacyPolicyUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/privacy",
+          "termsOfUseUrl": "https://dphwkv3b5f.us-east-1.awsapprunner.com/terms"
+        },
+        "mediaAssets": {
+          "icons": {
+            "light": [
+              {
+                "size": "72x72",
+                "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-72.png"
+              },
+              {
+                "size": "64x64",
+                "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-64.png"
+              },
+              {
+                "size": "88x88",
+                "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-88.png"
+              },
+              {
+                "size": "126x126",
+                "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-126.png"
+              },
+              {
+                "size": "180x180",
+                "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-180.png"
+              },
+              {
+                "size": "241x241",
+                "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/icon-241.png"
+              }
+            ]
+          },
+          "carouselImages": [
+            {
+              "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/carousel-1.png",
+              "altText": "Kinvesper: medication, check-ins and scam checks by voice",
+              "size": "600x900"
+            },
+            {
+              "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/addon/carousel-2.png",
+              "altText": "The family caregiver is texted about missed doses and symptoms",
+              "size": "600x900"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "integrations": [
+    {
+      "type": "MCP",
+      "config": {
+        "endpoints": {
+          "default": {
+            "type": "HTTPS",
+            "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/mcp"
+          }
+        }
+      }
+    }
+  ]
+}

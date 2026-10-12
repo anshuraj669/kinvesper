@@ -28,6 +28,9 @@ requests, so the app's scheduler is off (`SCHEDULER_INTERVAL_S=0`) and EventBrid
   To use another model, pass `-c llmModel=anthropic.claude-...`.
 - **SMS sandbox:** new accounts can only text verified numbers. Add the caregiver's number under
   SNS → Text messaging (SMS) → Sandbox destination phone numbers.
+  New accounts may also have a $0 SMS spend limit (adding a number fails with `AuthorizationError`),
+  and India (+91) needs DLT registration. To skip all of that, pass `-c caregiverEmail=you@example.com`
+  instead of (or as well as) `caregiverPhone`, and click the confirmation link SNS emails you.
 
 ## Deploy (two steps)
 
@@ -54,6 +57,12 @@ The first boot seeds the demo household into DynamoDB.
 **No Bedrock access yet?** Add `-c llmProvider=none` to both deploys. The app runs with
 rule-based scam checks, template summaries and the keyword router in the voice simulator.
 Once Bedrock works, deploy again without it to switch Claude on.
+
+**Claude API instead of Bedrock:** deploy with `-c llmProvider=anthropic`, then store a key from
+[platform.claude.com](https://platform.claude.com) with `make claude-key` (it goes into Secrets
+Manager and restarts the service). This also gives the voice agent web search, so it answers
+questions about today: weather, news, scores. `-c llmModel=claude-sonnet-5-5` trades some
+quality for faster replies.
 
 ## Use it
 
