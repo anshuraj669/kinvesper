@@ -110,6 +110,7 @@
   <span class="who" id="who"></span>
   <div class="spacer"></div>
   <button class="btn" id="runChecks" type="button">Run checks now</button>
+  <a class="btn" id="settings" href="/dashboard/settings">Settings</a>
   <a class="btn primary" href="/voice">Voice simulator</a>
 </header>
 <main id="main" aria-live="polite"><p class="empty">Loading…</p></main>
@@ -118,6 +119,7 @@
 (() => {
   const key = new URLSearchParams(location.search).get("key") || "";
   const headers = key ? { "X-Dashboard-Key": key } : {};
+  if (key) document.getElementById("settings").href = `/dashboard/settings?key=${encodeURIComponent(key)}`;
   const MOODS = ["great", "good", "okay", "low", "unwell"];
   const STATUS = {
     taken: ["good", "Taken"], due: ["warning", "Due now"], missed: ["critical", "Missed"], upcoming: ["muted", "Upcoming"],
@@ -294,7 +296,7 @@
           h("div", { class: "main" },
             h("div", { class: "title" }, a.title),
             a.detail ? h("div", { class: "detail" }, a.detail) : null,
-            h("div", { class: "meta" }, status(a.level), ` · ${ago(a.created_at)}`, a.notified ? " · texted" : "", a.acknowledged ? " · acknowledged" : "")),
+            h("div", { class: "meta" }, status(a.level), ` · ${ago(a.created_at)}`, a.notified ? " · sent to caregiver" : "", a.acknowledged ? " · acknowledged" : "")),
           a.acknowledged ? null : h("button", { class: "btn", type: "button", onclick: () => ack(a.id) }, "Acknowledge"))))
       : h("p", { class: "empty" }, "No alerts. All quiet.");
 
@@ -323,7 +325,7 @@
       tile("Doses today", `${taken} of ${today.length}`, missed ? `${missed} missed` : "None missed"),
       tile("Open alerts", String(d.open_alerts), urgent ? `${urgent} urgent` : "None urgent"),
       tile("Last active", ago(p.last_activity), p.last_activity ? new Date(p.last_activity).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : ""),
-      card("span-7", "Alerts", "Newest first. Warnings and urgent alerts are texted to the caregiver.", alerts),
+      card("span-7", "Alerts", "Newest first. Warnings and urgent alerts go to the caregiver's phone and email (see Settings).", alerts),
       card("span-5", "Today's doses", day(d.today.date, { weekday: "long", month: "long", day: "numeric" }), doses),
       card("span-7", "Doses taken, last 7 days", "Share of scheduled doses logged each day. Today counts only doses already due.",
         adherenceChart(d.adherence.by_day),

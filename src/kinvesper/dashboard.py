@@ -1,7 +1,11 @@
 """Caregiver dashboard: the page and its JSON API.
 
     GET  /dashboard                  the dashboard page
+    GET  /dashboard/settings         the settings page: the person, the caregiver's contact, the medicines
     GET  /api/dashboard              everything the page shows, in one call
+    GET  /api/settings               the household's settings
+    PUT  /api/settings               save them ({"profile": {...}, "medications": [...]})
+    POST /api/settings/test-alert    send a test alert to the caregiver's phone and email
     POST /api/alerts/{id}/ack        acknowledge an alert
     POST /api/checks                 run the proactive checks now (demo button)
 
@@ -20,13 +24,14 @@ from starlette.routing import Route
 
 from .config import settings
 from .scheduler import check_once
-from .service import CareService
+from .service import CareService, SettingsError
 
 OFF = "The caregiver dashboard is off: with OAuth on it needs DASHBOARD_KEY."
 
 
 def dashboard_routes(service: CareService) -> list[Route]:
     page = files("kinvesper").joinpath("static/dashboard.html").read_text()
+    settings_page = files("kinvesper").joinpath("static/settings.html").read_text()
 
     def guard(request: Request) -> Response | None:
         if not settings.oauth_issuer:
@@ -37,10 +42,35 @@ def dashboard_routes(service: CareService) -> list[Route]:
             return JSONResponse({"error": "Missing or wrong dashboard key"}, status_code=403)
         return None
 
-    async def dashboard_page(_: Request) -> Response:
+    def html(body: str) -> Response:
         if settings.oauth_issuer and not settings.dashboard_key:
             return HTMLResponse(f"<p>{OFF}</p>", status_code=404)
-        return HTMLResponse(page)
+        return HTMLResponse(body)
+
+    async def dashboard_page(_: Request) -> Response:
+        return html(page)
+
+    async def settings_html(_: Request) -> Response:
+        return html(settings_page)
+
+    async def household(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        if request.method == "GET":
+            return JSONResponse(await service.settings_view())
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or not isinstance(body.get("medications"), list):
+                raise SettingsError("Send a profile and a list of medicines.")
+            return JSONResponse(await service.update_settings(body.get("profile") or {}, body["medications"]))
+        except (SettingsError, ValueError) as e:
+            return JSONResponse({"error": str(e) if isinstance(e, SettingsError) else "Invalid request"}, status_code=400)
+
+    async def test_alert(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        alert = await service.send_test_alert()
+        return JSONResponse({"sent": alert.notified, **await service.settings_view()})
 
     async def data(request: Request) -> Response:
         if denied := guard(request):
@@ -62,7 +92,10 @@ def dashboard_routes(service: CareService) -> list[Route]:
 
     return [
         Route("/dashboard", dashboard_page),
+        Route("/dashboard/settings", settings_html),
         Route("/api/dashboard", data),
+        Route("/api/settings", household, methods=["GET", "PUT"]),
+        Route("/api/settings/test-alert", test_alert, methods=["POST"]),
         Route("/api/alerts/{alert_id}/ack", ack, methods=["POST"]),
         Route("/api/checks", checks, methods=["POST"]),
     ]

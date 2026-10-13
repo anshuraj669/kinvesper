@@ -114,6 +114,14 @@ To skip account linking while OAuth is on, give the simulator `SERVICE_TOKEN` as
 acknowledge), mood at check-in, medications with low-stock warnings and pharmacy refills. It
 refreshes every 15 seconds, so doses logged by voice show up on their own.
 
+`/dashboard/settings` is where the household is set up, nothing is hard-coded: the person, the
+caregiver's name, phone and email, and each medicine (dose, times, instructions, pills left). Voice,
+Alexa and alerts all read it from the store; the demo household is only first-run sample data.
+Alerts reach the caregiver through Amazon SNS: texts straight to the phone, and email through the
+alerts topic (saving an email subscribes it; Amazon sends a confirmation link). "Send test alert"
+checks both. Anything suspicious alerts: medium-risk scam checks as a warning, high-risk as urgent,
+as well as emergencies, worrying check-ins and messages.
+
 A scheduler inside the server runs every `SCHEDULER_INTERVAL_S` seconds:
 
 | Check | Alert | Texted |
@@ -173,7 +181,7 @@ src/kinvesper/
   scam.py         fraud red-flag rules + optional Claude refinement
   store.py        JSON-file or DynamoDB document store
   llm.py          Claude via Bedrock (Mantle) or the Claude API
-  notify.py       caregiver SMS via Amazon SNS
+  notify.py       caregiver alerts via Amazon SNS (text to the phone, email through the topic)
   seed.py         demo household
 ```
 

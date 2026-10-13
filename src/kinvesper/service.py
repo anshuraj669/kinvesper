@@ -83,6 +83,15 @@ def clean_message(text: str, caregiver: str) -> str:
     return (rest[:1].upper() + rest[1:]) if rest else text
 
 
+TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+PROFILE_FIELDS = ("patient_name", "preferred_name", "caregiver_name", "caregiver_relation",
+                  "caregiver_phone", "caregiver_email", "pharmacy_name")
+
+
+class SettingsError(ValueError):
+    """A settings form value that can't be saved; the message is shown to the caregiver."""
+
+
 class CareService:
     def __init__(self, store: Store):
         self.store = store
@@ -135,6 +144,81 @@ class CareService:
     def add_medication(self, med: Medication) -> Medication:
         self.store.save("med", med)
         return med
+
+    # ---------- settings (caregiver dashboard) ----------
+
+    async def settings_view(self) -> dict:
+        p = self.profile()
+        return {
+            "profile": {k: getattr(p, k) for k in PROFILE_FIELDS},
+            "medications": [m.model_dump() for m in self.medications()],
+            "email_status": await notify.email_status(p.caregiver_email),
+            "sms": bool(p.caregiver_phone),
+        }
+
+    async def update_settings(self, profile: dict, medications: list[dict]) -> dict:
+        """Replace the household's profile and medicine list. Medicines left out are retired, not
+        deleted, so their dose history stays. Raises SettingsError for a value that can't be saved."""
+        old = self.profile()
+        fields = {k: str(profile.get(k, getattr(old, k)) or "").strip() for k in PROFILE_FIELDS}
+        for k in ("patient_name", "preferred_name", "caregiver_name"):
+            if not fields[k]:
+                raise SettingsError(f"{k.replace('_', ' ').capitalize()} is required.")
+        fields["caregiver_phone"] = re.sub(r"[\s\-().]", "", fields["caregiver_phone"])
+        if fields["caregiver_phone"] and not notify.PHONE.match(fields["caregiver_phone"]):
+            raise SettingsError("Phone must include the country code, like +15551234567.")
+        if fields["caregiver_email"] and not notify.EMAIL.match(fields["caregiver_email"]):
+            raise SettingsError("That email address doesn't look right.")
+        if not (fields["caregiver_phone"] or fields["caregiver_email"]):
+            raise SettingsError("Add a phone number or an email, so alerts reach the caregiver.")
+
+        current = {m.id: m for m in self.store.load_all("med", Medication)}
+        meds = [self._medication(m, current) for m in medications]
+        if not meds:
+            raise SettingsError("Add at least one medicine.")
+
+        self.store.save("profile", old.model_copy(update=fields), id="main")
+        kept = {m.id for m in meds}
+        for m in meds:
+            self.store.save("med", m)
+        for m in current.values():
+            if m.active and m.id not in kept:
+                self.store.save("med", m.model_copy(update={"active": False}))
+        await notify.change_email(old.caregiver_email, fields["caregiver_email"])
+        return await self.settings_view()
+
+    async def send_test_alert(self) -> Alert:
+        p = self.profile()
+        return await self.raise_alert(
+            "info", "test", "Test alert",
+            f"This is how Kinvesper will reach you, {p.caregiver_name}, when something needs your attention.", sms=True)
+
+    @staticmethod
+    def _medication(data: dict, current: dict[str, Medication]) -> Medication:
+        name = str(data.get("name") or "").strip()
+        if not name:
+            raise SettingsError("Every medicine needs a name.")
+        times = data.get("times") or []
+        if isinstance(times, str):
+            times = times.replace(",", " ").split()
+        times = sorted({t.strip().zfill(5) for t in times})
+        if not times or not all(TIME.match(t) for t in times):
+            raise SettingsError(f"{name}: times must be 24-hour HH:MM, like 08:00 or 20:30.")
+        try:
+            pills = int(data.get("pills_remaining", 30))
+        except (TypeError, ValueError):
+            pills = -1
+        if pills < 0:
+            raise SettingsError(f"{name}: pills left must be a whole number.")
+        values = {
+            "name": name, "dose": str(data.get("dose") or "").strip(), "times": times, "pills_remaining": pills,
+            "purpose": str(data.get("purpose") or "").strip(), "instructions": str(data.get("instructions") or "").strip(),
+            "active": True,
+        }
+        if not values["dose"]:
+            raise SettingsError(f"{name}: add the dose, like 10 mg.")
+        existing = current.get(str(data.get("id") or ""))
+        return existing.model_copy(update=values) if existing else Medication(**values)
 
     # ---------- doses & schedule ----------
 
@@ -336,7 +420,8 @@ class CareService:
         alert = Alert(created_at=now().isoformat(), level=level, kind=kind, title=title, detail=detail, dedupe_key=dedupe_key)
         if sms if sms is not None else level != "info":
             p = self.profile()
-            alert.notified = await notify.send(f"Kinvesper: {title}", f"{detail}\n— about {p.patient_name}")
+            alert.notified = await notify.send(f"Kinvesper: {title}", f"{detail}\n— about {p.patient_name}",
+                                               phone=p.caregiver_phone)
         self.store.save("alert", alert)
         return alert
 
@@ -372,11 +457,13 @@ class CareService:
 
     async def check_scam(self, description: str) -> ScamAssessment:
         result = await scam.assess(description)
-        if result.risk == "high":
+        if result.risk in ("medium", "high"):  # anything suspicious reaches the caregiver
             p = self.profile()
+            high = result.risk == "high"
             await self.raise_alert(
-                "warning", "scam", f"Possible scam targeting {p.preferred_name}",
-                f"{description}\nRed flags: {'; '.join(result.red_flags)}",
+                "urgent" if high else "warning", "scam",
+                f"{'Likely scam' if high else 'Suspicious contact'} targeting {p.preferred_name}",
+                f"{description}\nRed flags: {'; '.join(result.red_flags) or 'none named'}",
             )
             result.family_alerted = True
             result.advice += f" I've also let {p.caregiver_name} know so they can check in with you."

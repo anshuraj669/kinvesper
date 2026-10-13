@@ -221,7 +221,7 @@ def build_server(service: CareService) -> KinvesperMCP:
         title="Message family",
         icons=icon("message", TEAL),
         description=(
-            "Send a message from the person to their caregiver (e.g. 'tell Priya I'm going to the doctor'). "
+            "Send a message from the person to their caregiver (e.g. 'tell my daughter I'm going to the doctor'). "
             "Asks the person to confirm first when the client supports it."
         ),
         annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True),

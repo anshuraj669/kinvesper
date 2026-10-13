@@ -76,6 +76,16 @@ def test_instance_role_least_privilege(template):
     assert not any(a.endswith(":*") or a == "*" for a in actions)
 
 
+def test_app_manages_the_caregiver_email_subscription(template):
+    statements = [st for p in template.find_resources("AWS::IAM::Policy").values()
+                  for st in p["Properties"]["PolicyDocument"]["Statement"]]
+    email = next(st for st in statements if st.get("Sid") == "CaregiverEmail")
+    assert set(email["Action"]) == {"sns:Subscribe", "sns:Unsubscribe", "sns:ListSubscriptionsByTopic"}
+    assert email["Resource"] != "*"
+    sms = next(st for st in statements if st.get("Sid") == "CaregiverSms")
+    assert sms["Action"] == "sns:Publish"
+
+
 def test_oauth_client_is_public_pkce(template):
     template.has_resource_properties("AWS::Cognito::UserPoolClient", {
         "GenerateSecret": False,

@@ -68,6 +68,17 @@ def _run_server(data_dir, port=None, **extra_env):
     raise RuntimeError("server did not start")
 
 
+@pytest.fixture
+def fresh_server(tmp_path):
+    """A server of its own, for tests that change the household."""
+    proc, base = _run_server(tmp_path)
+    try:
+        yield base
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+
 @pytest.fixture(scope="session")
 def server_url(tmp_path_factory):
     proc, base = _run_server(tmp_path_factory.mktemp("data"))

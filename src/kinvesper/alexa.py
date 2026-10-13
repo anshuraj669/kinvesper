@@ -46,7 +46,7 @@ MAX_BODY_BYTES = 128 * 1024
 
 WELCOME = ("Hi {name}, it's Kinvesper. You can ask about your pills, tell me you took them, "
            "check a suspicious call, or send {caregiver} a message.{anything} What would you like?")
-HELP = ("You can say things like: did I take my pills, I just took my Lisinopril, someone called asking "
+HELP = ("You can say things like: did I take my pills, I just took my {medicine}, someone called asking "
         "for gift cards, or tell {caregiver} I'm fine.{anything} What would you like?")
 ANYTHING = " Or ask me anything else."
 REPROMPT = "Anything else?"
@@ -182,12 +182,13 @@ class AlexaBridge:
         intent = request.get("intent") or {}
         name = intent.get("name", "")
         if name in ("AMAZON.StopIntent", "AMAZON.CancelIntent", "AMAZON.NavigateHomeIntent"):
-            if session.awaiting_confirmation:  # a pending "send this to Priya?" counts as no
+            if session.awaiting_confirmation:  # a pending "send this to <caregiver>?" counts as no
                 await session.turn("no")
             await self._end(alexa_id)
             return speak(GOODBYE, end=True)
         if name == "AMAZON.HelpIntent":
-            return speak(HELP.format(caregiver=session.caregiver, anything=anything), end=False)
+            medicine = session.meds[0]["name"] if session.meds else "medicine"
+            return speak(HELP.format(caregiver=session.caregiver, medicine=medicine, anything=anything), end=False)
         if late := self._late.pop(alexa_id, None):  # whatever they said, they're waiting for this answer
             return await self._reply(alexa_id, session, late, one_shot=False)
         if name == "AMAZON.FallbackIntent":

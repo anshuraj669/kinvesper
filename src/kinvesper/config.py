@@ -54,9 +54,12 @@ class Settings:
     llm_model: str = field(default_factory=lambda: _env("LLM_MODEL"))
     llm_effort: str = field(default_factory=lambda: _env("LLM_EFFORT", "low"))
 
-    # Caregiver notifications: SNS topic ARN or a direct E.164 phone number. Empty = log only.
+    # Caregiver notifications go to the phone and email saved in the dashboard's Settings, through
+    # Amazon SNS: texts directly, emails through this topic. Without a topic or phone, alerts are logged.
     sns_topic_arn: str = field(default_factory=lambda: _env("SNS_TOPIC_ARN"))
+    # Starting contact for a freshly seeded household (then edited in Settings).
     caregiver_sms: str = field(default_factory=lambda: _env("CAREGIVER_SMS"))
+    caregiver_email: str = field(default_factory=lambda: _env("CAREGIVER_EMAIL"))
 
     # OAuth (Cognito) for the MCP endpoint. Empty issuer = auth disabled (local dev).
     oauth_issuer: str = field(default_factory=lambda: _env("OAUTH_ISSUER"))

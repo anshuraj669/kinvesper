@@ -28,10 +28,15 @@ def local() -> bool:
 
 
 def server_tools() -> list[dict]:
-    """Tools Anthropic runs for us: web search answers questions about today (weather, news, opening hours)."""
+    """Tools Anthropic runs for us: web search answers questions about today (weather, news, opening hours).
+
+    The basic search, once per question: ~4.5 s and ~14k input tokens for "weather in Kathmandu today",
+    against ~12 s and ~20k for the dynamic-filtering version (web_search_20260209), which runs code
+    over the results first. A spoken answer needs one good result, and Alexa waits 8 seconds.
+    """
     if settings.llm_provider != "anthropic":
         return []
-    return [{"type": "web_search_20260209", "name": "web_search", "max_uses": 2}]
+    return [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
 
 
 async def warm_up() -> None:

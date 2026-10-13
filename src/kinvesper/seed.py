@@ -29,7 +29,7 @@ def seed(store: Store, days_of_history: int = 6) -> None:
     current = now()
     store.save("profile", Profile(
         patient_name="Margaret Hill", preferred_name="Margaret", caregiver_name="Priya",
-        caregiver_relation="daughter", caregiver_phone=settings.caregiver_sms,
+        caregiver_relation="daughter", caregiver_phone=settings.caregiver_sms, caregiver_email=settings.caregiver_email,
         pharmacy_name="Main Street Pharmacy", last_activity=current.isoformat(),
     ), id="main")
     for m in MEDS:

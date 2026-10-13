@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run Kinvesper on this machine against the deployed AWS stack: the same DynamoDB table and
-# SNS topic as the cloud app, with a local Ollama model as the brain.
+# SNS topic as the cloud app. The brain is Claude with the stack's stored API key when there is one
+# (make claude-key), otherwise a local Ollama model.
 #
 #   ./scripts/run_local_aws.sh               # voice simulator at http://127.0.0.1:8000/voice
 #   LLM_PROVIDER=none ./scripts/run_local_aws.sh
@@ -9,9 +10,12 @@
 # LLM_MODEL, OLLAMA_URL, CARE_TZ, PORT. Proactive checks stay with EventBridge in the cloud.
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+source scripts/load_env.sh
+load_env .env  # e.g. ANTHROPIC_API_KEY; the stack's table and topic below replace STORE and DATA_FILE
+
 STACK="${STACK:-Kinvesper}"
 export AWS_REGION="${AWS_REGION:-us-east-1}"
-export LLM_PROVIDER="${LLM_PROVIDER:-ollama}"
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
 LLM_MODEL="${LLM_MODEL:-llama3.1}"
 
@@ -30,6 +34,20 @@ export DYNAMODB_TABLE="$(output TableName)"
 export SNS_TOPIC_ARN="$(output AlertsTopic)"
 export SCHEDULER_INTERVAL_S=0  # EventBridge already runs the checks against the same table
 [[ -n "$DYNAMODB_TABLE" && -n "$SNS_TOPIC_ARN" ]] || die "stack '$STACK' is missing the TableName or AlertsTopic output"
+
+# Claude: the key from .env, else the one stored in the stack (make claude-key); otherwise Ollama.
+if [[ "${LLM_PROVIDER:-anthropic}" == anthropic && -z "${ANTHROPIC_API_KEY:-}" && -n "$(output ClaudeApiKeySecret)" ]]; then
+  key=$(aws secretsmanager get-secret-value --secret-id "$(output ClaudeApiKeySecret)" \
+    --query SecretString --output text 2>/dev/null) || key=""
+  [[ "$key" == sk-ant-* ]] && export ANTHROPIC_API_KEY="$key"
+  unset key
+fi
+if [[ -z "${LLM_PROVIDER:-}" ]]; then
+  [[ -n "${ANTHROPIC_API_KEY:-}" ]] && LLM_PROVIDER=anthropic || LLM_PROVIDER=ollama
+fi
+[[ "$LLM_PROVIDER" != anthropic || -n "${ANTHROPIC_API_KEY:-}" ]] \
+  || die "LLM_PROVIDER=anthropic needs ANTHROPIC_API_KEY: put your sk-ant-... key in .env"
+export LLM_PROVIDER
 
 if [[ "$LLM_PROVIDER" == "ollama" ]]; then
   export OLLAMA_URL LLM_MODEL

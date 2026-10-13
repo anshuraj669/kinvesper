@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Store the Claude API key the deployed voice agent uses, then restart the service to pick it up.
 #
-#   ./scripts/set_claude_key.sh          # asks for the key (from platform.claude.com, starts sk-ant-)
+#   ./scripts/set_claude_key.sh          # uses ANTHROPIC_API_KEY from .env, or asks for it
 #
 # Needs the stack deployed with -c llmProvider=anthropic and the AWS CLI signed in.
 # Overrides: STACK, AWS_REGION.
 set -euo pipefail
+
+cd "$(dirname "$0")/.."
+source scripts/load_env.sh
+load_env .env
 
 STACK="${STACK:-Kinvesper}"
 export AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -21,7 +25,12 @@ secret=$(output ClaudeApiKeySecret) || die "stack '$STACK' not found in $AWS_REG
 service=$(output ServiceArn)
 [[ -n "$service" && "$service" != "None" ]] || die "stack '$STACK' has no ServiceArn output: redeploy it"
 
-read -rsp "Claude API key: " key; echo
+key="${ANTHROPIC_API_KEY:-}"
+if [[ -n "$key" ]]; then
+  echo "Using ANTHROPIC_API_KEY from .env (ending ...${key: -4})."
+else
+  read -rsp "Claude API key: " key; echo
+fi
 [[ "$key" == sk-ant-* ]] || die "that doesn't look like a Claude API key (sk-ant-...)"
 
 # Through a private temp file, so the key never appears in the process list.

@@ -7,7 +7,7 @@ One CDK stack (`kinvesper_stack.py`) creates everything:
 | **AWS App Runner** | Runs the container (1 vCPU, 2 GB, exactly one instance) with an HTTPS URL and `/health` checks |
 | **Amazon ECR** | Holds the image that `cdk deploy` builds from the repo's `Dockerfile` |
 | **Amazon DynamoDB** | Single table (`pk` = patient, `sk` = `<kind>#<id>`), on-demand, point-in-time recovery |
-| **Amazon Bedrock** | Claude (`anthropic.claude-opus-5-5`) through the Messages API endpoint (`bedrock-mantle:CreateInference`) |
+| **Claude** | The voice agent's brain: the Claude API with web search (default, key in Secrets Manager), or Amazon Bedrock with `-c llmProvider=bedrock` |
 | **Amazon Cognito** | OAuth 2.1 authorization server for `/mcp`: user pool, `kinvesper/mcp` scope, public PKCE client, hosted login |
 | **Amazon SNS** | Caregiver alert texts; a second topic for ops alarms |
 | **AWS Secrets Manager** | Generated `SERVICE_TOKEN`, `SIMULATOR_KEY`, `DASHBOARD_KEY` (never in the template or image) |
@@ -24,13 +24,17 @@ requests, so the app's scheduler is off (`SCHEDULER_INTERVAL_S=0`) and EventBrid
 - An AWS account and the [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), signed in (`aws configure` or `aws sso login`). Check with `aws sts get-caller-identity`.
 - Docker running (the image is built locally and pushed to ECR).
 - Node.js 22 or 24 for the CDK CLI (18 works but warns), and `uv`.
-- **Bedrock model access:** in the Bedrock console for your region, request access to Claude Opus 5.5.
-  To use another model, pass `-c llmModel=anthropic.claude-...`.
+- **A Claude API key** from [platform.claude.com](https://platform.claude.com) (`cdk.json` sets
+  `llmProvider=anthropic`; you store the key after the first deploy with `make claude-key`). For
+  Bedrock instead, pass `-c llmProvider=bedrock` and request access to Claude Opus 5.5 in the
+  Bedrock console (another model: `-c llmModel=anthropic.claude-...`).
+- **Caregiver contact:** set it after deploying, in the dashboard's Settings (`/dashboard/settings`):
+  saving an email subscribes it to the alerts topic, and the caregiver clicks Amazon's confirmation
+  link. (`-c caregiverPhone=` / `-c caregiverEmail=` still subscribe extra contacts at deploy time.)
 - **SMS sandbox:** new accounts can only text verified numbers. Add the caregiver's number under
   SNS → Text messaging (SMS) → Sandbox destination phone numbers.
   New accounts may also have a $0 SMS spend limit (adding a number fails with `AuthorizationError`),
-  and India (+91) needs DLT registration. To skip all of that, pass `-c caregiverEmail=you@example.com`
-  instead of (or as well as) `caregiverPhone`, and click the confirmation link SNS emails you.
+  and India (+91) needs DLT registration. Email avoids all of that; a failed text never stops the email.
 
 ## Deploy (two steps)
 
@@ -54,13 +58,12 @@ npx aws-cdk@2 deploy -c careTz=America/New_York -c caregiverPhone=+15551234567 \
 
 The first boot seeds the demo household into DynamoDB.
 
-**No Bedrock access yet?** Add `-c llmProvider=none` to both deploys. The app runs with
+**No key yet?** Add `-c llmProvider=none` to both deploys. The app runs with
 rule-based scam checks, template summaries and the keyword router in the voice simulator.
-Once Bedrock works, deploy again without it to switch Claude on.
+Deploy again without it to switch Claude on.
 
-**Claude API instead of Bedrock:** deploy with `-c llmProvider=anthropic`, then store a key from
-[platform.claude.com](https://platform.claude.com) with `make claude-key` (it goes into Secrets
-Manager and restarts the service). This also gives the voice agent web search, so it answers
+**The Claude API key:** after deploying, run `make claude-key` (from the repo root). The key goes
+into Secrets Manager and the service restarts with it; until then the keyword router answers. This also gives the voice agent web search, so it answers
 questions about today: weather, news, scores. `-c llmModel=claude-sonnet-5-5` trades some
 quality for faster replies.
 

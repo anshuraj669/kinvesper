@@ -100,14 +100,10 @@ async def test_claude_loop_uses_mcp_tools(connect, monkeypatch):
 
     async def fake_create(**params):
         calls.append(params)
-        if len(calls) == 1:
-            assert {t["name"] for t in params["tools"]} >= {"get_medication_schedule", "request_pharmacy_refill"}
-            assert "Margaret" in params["system"][0]["text"]
-            return _reply("tool_use", _block(type="tool_use", id="tu_1", name="get_medication_schedule",
-                                             input={"medication": "blood pressure"}))
-        result = params["messages"][-1]["content"][0]
-        assert result["tool_use_id"] == "tu_1" and "Lisinopril" in result["content"]
-        return _reply("end_turn", _block(type="text", text="Your blood pressure pill is Lisinopril."))
+        assert {t["name"] for t in params["tools"]} >= {"get_medication_schedule", "request_pharmacy_refill"}
+        assert "Margaret" in params["system"][0]["text"]
+        return _reply("tool_use", _block(type="tool_use", id="tu_1", name="get_medication_schedule",
+                                         input={"medication": "blood pressure"}))
 
     monkeypatch.setattr(voice.llm, "enabled", lambda: True)
     monkeypatch.setattr(voice.llm, "create_message", fake_create)
@@ -115,10 +111,12 @@ async def test_claude_loop_uses_mcp_tools(connect, monkeypatch):
     await session.start()
     try:
         out = await session.turn("Did I take my blood pressure pill?")
-        assert out.reply == "Your blood pressure pill is Lisinopril."
+        # The tool's own spoken reply, from the real schedule: no second model call.
+        assert "Lisinopril" in out.reply and len(calls) == 1
         assert [c.name for c in out.tool_calls] == ["get_medication_schedule"]
         roles = [m["role"] for m in session.history]
         assert roles == ["user", "assistant", "user", "assistant"]
+        assert session.history[2]["content"][0]["tool_use_id"] == "tu_1"
     finally:
         await session.close()
 
@@ -129,11 +127,8 @@ async def test_claude_loop_waits_for_spoken_confirmation(connect, monkeypatch):
     async def fake_create(**params):
         nonlocal step
         step += 1
-        if step == 1:
-            return _reply("tool_use", _block(type="tool_use", id="tu_1", name="notify_caregiver",
-                                             input={"message": "Running late"}))
-        assert json.loads(params["messages"][-1]["content"][0]["content"])["sent"] is True
-        return _reply("end_turn", _block(type="text", text="Done, Priya knows."))
+        return _reply("tool_use", _block(type="tool_use", id="tu_1", name="notify_caregiver",
+                                         input={"message": "Running late"}))
 
     monkeypatch.setattr(voice.llm, "enabled", lambda: True)
     monkeypatch.setattr(voice.llm, "create_message", fake_create)
@@ -143,7 +138,8 @@ async def test_claude_loop_waits_for_spoken_confirmation(connect, monkeypatch):
         ask = await session.turn("Tell Priya I'm running late")
         assert ask.awaiting_confirmation
         done = await session.turn("Yes")
-        assert done.reply == "Done, Priya knows."
+        assert "sent that to Priya" in done.reply and step == 1
+        assert json.loads(session.history[2]["content"][0]["content"])["sent"] is True
     finally:
         await session.close()
 
@@ -154,7 +150,7 @@ async def test_claude_answers_anything_with_web_search(connect, monkeypatch):
     async def fake_create(**params):
         calls.append(params)
         if len(calls) == 1:  # the server paused a long search; sending the turn back resumes it
-            assert {"type": "web_search_20260209", "name": "web_search", "max_uses": 2} in params["tools"]
+            assert {"type": "web_search_20250305", "name": "web_search", "max_uses": 1} in params["tools"]
             return _reply("pause_turn", _block(type="server_tool_use", id="srv_1", name="web_search",
                                                input={"query": "Kathmandu weather today"}))
         assert params["messages"][-1]["role"] == "assistant"
@@ -163,7 +159,7 @@ async def test_claude_answers_anything_with_web_search(connect, monkeypatch):
 
     monkeypatch.setattr(voice.llm, "enabled", lambda: True)
     monkeypatch.setattr(voice.llm, "server_tools", lambda: [
-        {"type": "web_search_20260209", "name": "web_search", "max_uses": 2}])
+        {"type": "web_search_20250305", "name": "web_search", "max_uses": 1}])
     monkeypatch.setattr(voice.llm, "create_message", fake_create)
     session = VoiceSession(connect=connect)
     await session.start()
@@ -171,6 +167,9 @@ async def test_claude_answers_anything_with_web_search(connect, monkeypatch):
         out = await session.turn("What's the weather in Kathmandu today?")
         assert out.reply == "It's sunny in Kathmandu, around 24 degrees."
         assert out.tool_calls == [] and len(calls) == 2
+        # The search results are dropped from the history: later turns only carry what was said.
+        assert session.history == [{"role": "user", "content": "What's the weather in Kathmandu today?"},
+                                    {"role": "assistant", "content": out.reply}]
     finally:
         await session.close()
 

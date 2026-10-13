@@ -24,7 +24,8 @@ class Profile(BaseModel):
     preferred_name: str
     caregiver_name: str
     caregiver_relation: str = "daughter"
-    caregiver_phone: str = ""
+    caregiver_phone: str = ""  # E.164; alerts are texted here
+    caregiver_email: str = ""  # alerts are emailed here once the caregiver confirms Amazon's link
     pharmacy_name: str = "Main Street Pharmacy"
     last_activity: str | None = None  # ISO timestamp of the last voice interaction
 
@@ -52,7 +53,7 @@ class DoseLog(BaseModel):
 
 AlertLevel = Literal["info", "warning", "urgent"]
 AlertKind = Literal[
-    "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock"
+    "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock", "test"
 ]
 
 

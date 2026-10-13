@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinvesper Settings</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f6f5; --panel: #ffffff; --ink: #14201d; --ink-2: #4a5754; --muted: #6f7c78; --line: #dfe5e3;
+    --brand: #0f766e; --brand-soft: #d9f0ec; --wash: #f1f4f3;
+    --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
+    --shadow: 0 1px 2px rgba(16,24,22,.06), 0 8px 24px rgba(16,24,22,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --ink-2: #c3cfcb; --muted: #93a39f; --line: #25332f;
+      --brand: #2dd4bf; --brand-soft: #123a35; --wash: #1c2a27; --critical: #f07070;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --ink-2: #c3cfcb; --muted: #93a39f; --line: #25332f;
+    --brand: #2dd4bf; --brand-soft: #123a35; --wash: #1c2a27; --critical: #f07070;
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  header h1 span { color: var(--muted); font-weight: 450; }
+  .spacer { flex: 1; }
+  .btn {
+    font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-decoration: none;
+  }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--panel); }
+  .btn.quiet { border-color: transparent; color: var(--ink-2); padding: 6px 10px; }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .btn:focus-visible, input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  main { max-width: 860px; margin: 0 auto; padding: 20px 20px 100px; display: grid; gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px; }
+  .card h2 { font-size: 15px; margin: 0 0 2px; font-weight: 650; }
+  .card .sub { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+  .grid { display: grid; gap: 12px 16px; grid-template-columns: repeat(2, 1fr); }
+  .grid .wide { grid-column: 1 / -1; }
+  label { display: grid; gap: 4px; align-content: start; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  label .hint { font-weight: 400; font-size: 12px; color: var(--muted); }
+  input {
+    font: inherit; font-size: 15px; font-weight: 400; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); width: 100%; min-width: 0;
+  }
+  .med { border-top: 1px solid var(--line); padding: 14px 0; }
+  .med:first-of-type { border-top: none; padding-top: 0; }
+  .med-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .med-head strong { flex: 1; }
+  .note { font-size: 13px; color: var(--ink-2); margin-top: 6px; display: flex; gap: 6px; align-items: flex-start; }
+  .note svg { width: 14px; height: 14px; flex: none; margin-top: 3px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line);
+    padding: 12px 20px; display: flex; gap: 12px; align-items: center; justify-content: flex-end;
+  }
+  .bar .msg { flex: 1; font-size: 14px; color: var(--ink-2); }
+  .bar .msg.error { color: var(--critical); }
+  .empty { color: var(--muted); font-size: 14px; }
+  @media (max-width: 640px) {
+    main { padding: 16px 16px 120px; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kinvesper <span>· settings</span></h1>
+  <div class="spacer"></div>
+  <a class="btn" id="back" href="/dashboard">Back to dashboard</a>
+</header>
+<main id="main"><p class="empty">Loading…</p></main>
+<div class="bar">
+  <span class="msg" id="msg" role="status" aria-live="polite"></span>
+  <button class="btn primary" id="save" type="button" disabled>Save</button>
+</div>
+<script>
+(() => {
+  const key = new URLSearchParams(location.search).get("key") || "";
+  const headers = key ? { "X-Dashboard-Key": key, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
+  if (key) document.getElementById("back").href = `/dashboard?key=${encodeURIComponent(key)}`;
+  const ICONS = {
+    good: '<circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+    warning: '<path d="M7 1l6.3 11H.7z" fill="var(--warning)"/><path d="M7 5v3.2M7 10.2h.01" stroke="#1a1a19" stroke-width="1.6" stroke-linecap="round"/>',
+    muted: '<circle cx="7" cy="7" r="5.2" fill="none" stroke="var(--muted)" stroke-width="1.6"/>',
+  };
+  const EMAIL = {
+    confirmed: ["good", "Confirmed: alerts are emailed here."],
+    pending: ["warning", "Waiting for confirmation: open the email from “AWS Notifications” and click Confirm subscription."],
+    not_subscribed: ["muted", "Save to send the confirmation email."],
+    no_topic: ["muted", "Running locally: alerts are logged, not emailed."],
+    unknown: ["muted", "Couldn't check the email status right now."],
+  };
+  const save = document.getElementById("save"), msg = document.getElementById("msg");
+  let state = null;
+
+  function h(tag, attrs = {}, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") el.className = v;
+      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+      else if (v !== undefined && v !== null && v !== false) el.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) el.append(kid);
+    return el;
+  }
+  function note(tone, text) {
+    const n = h("div", { class: "note" });
+    n.innerHTML = `<svg viewBox="0 0 14 14" aria-hidden="true">${ICONS[tone]}</svg>`;
+    n.append(text);
+    return n;
+  }
+  const say = (text, error = false) => { msg.textContent = text; msg.className = error ? "msg error" : "msg"; };
+  const dirty = () => { save.disabled = false; say("Unsaved changes"); };
+
+  // A text field bound to obj[prop].
+  function field(label, obj, prop, opts = {}) {
+    const input = h("input", { type: opts.type || "text", value: obj[prop] ?? "", placeholder: opts.placeholder || "",
+      autocomplete: opts.autocomplete || "off", inputmode: opts.inputmode, required: opts.required,
+      oninput: (e) => { obj[prop] = opts.type === "number" ? e.target.value : e.target.value; dirty(); } });
+    return h("label", { class: opts.wide ? "wide" : "" }, label, input, opts.hint ? h("span", { class: "hint" }, opts.hint) : null);
+  }
+
+  function medCard(m, i) {
+    const times = { value: (m.times || []).join(", ") };
+    const timesField = field("Times", times, "value", { placeholder: "08:00, 20:00", hint: "24-hour, separated by commas" });
+    timesField.querySelector("input").addEventListener("input", () => { m.times = times.value.split(/[,\s]+/).filter(Boolean); });
+    return h("div", { class: "med" },
+      h("div", { class: "med-head" }, h("strong", {}, m.name || `Medicine ${i + 1}`),
+        h("button", { class: "btn quiet", type: "button", onclick: () => { state.medications.splice(i, 1); dirty(); render(); } }, "Remove")),
+      h("div", { class: "grid" },
+        field("Name", m, "name", { required: true }),
+        field("Dose", m, "dose", { placeholder: "10 mg", required: true }),
+        timesField,
+        field("Pills left", m, "pills_remaining", { type: "number", inputmode: "numeric" }),
+        field("What it's for", m, "purpose", { placeholder: "blood pressure", hint: "helps match “my blood pressure pill”", wide: true }),
+        field("Instructions", m, "instructions", { placeholder: "take with food", wide: true })));
+  }
+
+  function render() {
+    const p = state.profile;
+    const [tone, text] = EMAIL[state.email_status] || EMAIL.unknown;
+    const testBtn = h("button", { class: "btn", type: "button", onclick: testAlert }, "Send test alert");
+    document.getElementById("main").replaceChildren(
+      h("section", { class: "card" }, h("h2", {}, "The person"),
+        h("p", { class: "sub" }, "Who Kinvesper talks with. The short name is what it calls them."),
+        h("div", { class: "grid" },
+          field("Full name", p, "patient_name", { required: true }),
+          field("Called", p, "preferred_name", { required: true, placeholder: "first name or nickname" }),
+          field("Pharmacy", p, "pharmacy_name", { wide: true }))),
+      h("section", { class: "card" }, h("h2", {}, "Caregiver"),
+        h("p", { class: "sub" }, "Suspicious calls, emergencies, missed doses and messages go to this phone and email."),
+        h("div", { class: "grid" },
+          field("Name", p, "caregiver_name", { required: true }),
+          field("Relationship", p, "caregiver_relation", { placeholder: "daughter" }),
+          field("Phone", p, "caregiver_phone", { type: "tel", placeholder: "+15551234567", hint: "with country code", autocomplete: "tel" }),
+          field("Email", p, "caregiver_email", { type: "email", placeholder: "name@example.com", autocomplete: "email" })),
+        p.caregiver_email ? note(tone, text) : null,
+        p.caregiver_phone ? note("muted", "Texts from a new AWS account only reach numbers verified in the SNS SMS sandbox.") : null,
+        h("div", { class: "row" }, testBtn)),
+      h("section", { class: "card" }, h("h2", {}, "Medicines"),
+        h("p", { class: "sub" }, "Kinvesper reminds, logs doses and orders refills from this list."),
+        state.medications.length ? state.medications.map(medCard) : h("p", { class: "empty" }, "No medicines yet."),
+        h("div", { class: "row" }, h("button", { class: "btn", type: "button",
+          onclick: () => { state.medications.push({ name: "", dose: "", times: [], pills_remaining: 30, purpose: "", instructions: "" }); dirty(); render(); } },
+          "Add medicine"))),
+    );
+  }
+
+  async function call(method, url, body) {
+    const r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    return data;
+  }
+
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    say("Saving…");
+    try {
+      state = await call("PUT", "/api/settings", { profile: state.profile, medications: state.medications });
+      render();
+      say(state.email_status === "pending" ? "Saved. Check the caregiver's inbox to confirm alert emails." : "Saved.");
+    } catch (e) {
+      save.disabled = false;
+      say(e.message, true);
+    }
+  });
+
+  async function testAlert() {
+    if (!save.disabled) return say("Save your changes first.", true);
+    say("Sending…");
+    try {
+      const r = await call("POST", "/api/settings/test-alert");
+      state = { ...state, email_status: r.email_status };
+      render();
+      say(r.sent ? "Test alert sent." : "Nothing was sent: alerts are only logged here.", !r.sent);
+    } catch (e) {
+      say(e.message, true);
+    }
+  }
+
+  call("GET", "/api/settings")
+    .then((d) => { state = d; render(); })
+    .catch((e) => document.getElementById("main").replaceChildren(h("p", { class: "msg error" }, `Couldn't load settings: ${e.message}`)));
+  addEventListener("beforeunload", (e) => { if (!save.disabled) e.preventDefault(); });
+})();
+</script>
+</body>
+</html>

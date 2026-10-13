@@ -188,7 +188,7 @@
   const key = new URLSearchParams(location.search).get("key") || "";
   const keyHeader = key ? { "X-Simulator-Key": key } : {};
   const headers = { "Content-Type": "application/json", ...keyHeader };
-  let sid = null, caregiver = "Priya", busy = false, heardByVoice = false;
+  let sid = null, caregiver = "family", meds = [], busy = false, heardByVoice = false;
   // Speech runs on the server (Whisper in, Amazon Polly out): browsers' built-in speech support varies
   // too much (Brave and Firefox can't recognise speech; Linux browsers often have no voices).
   const speech = window.speechSynthesis;
@@ -392,16 +392,18 @@
   }
 
   function scenarios() {
+    const [first, last] = [meds[0], meds[meds.length - 1]];  // from the household's medicine list (Settings)
     const list = [
       "What pills do I need today?",
-      "Did I take my blood pressure pill?",
-      "I just took my blood pressure pill.",
+      first && `Did I take my ${first}?`,
+      first && `I just took my ${first}.`,
       "A man called saying my grandson is in jail and needs gift cards for bail. He said not to tell anyone.",
       "I'm feeling a bit dizzy today.",
       `Tell ${caregiver} I'm going to the doctor at 3.`,
-      "Can you order more of my cholesterol pills?",
+      last && `Can you order more of my ${last}?`,
       "How was my week?",
-    ];
+    ].filter(Boolean);
+    $("scenarios").replaceChildren();
     for (const text of list) {
       const b = document.createElement("button");
       b.textContent = `“${text}”`;
@@ -430,7 +432,7 @@
       const r = await fetch("/api/voice/sessions", { method: "POST", headers });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || r.statusText);
-      sid = data.id; caregiver = data.caregiver;
+      sid = data.id; caregiver = data.caregiver; meds = data.medications || [];
       const providers = { bedrock: "Claude · Amazon Bedrock", anthropic: "Claude · Claude API", ollama: "Local model · Ollama" };
       $("mode").textContent = data.mode === "claude" ? providers[data.provider] : "Offline keyword router";
       $("text").disabled = $("send").disabled = false;

@@ -45,6 +45,8 @@ warnings.filterwarnings("ignore", "The experimental tasks API is deprecated", De
 
 MAX_STEPS = 8
 LOCAL_HISTORY_TURNS = 4  # local models have small context windows: send only the last few exchanges
+HISTORY_TURNS = 8  # Claude: enough for follow-ups, without paying for the whole conversation every turn
+MAX_REPLY_TOKENS = 1024  # spoken replies are a few sentences
 # Free-text arguments the server scans for symptoms and scam signs. Small local models sometimes leave
 # them empty, so the person's own words are passed instead.
 SPOKEN_TEXT_ARGS = {"daily_check_in": "notes", "check_for_scam": "description"}
@@ -57,6 +59,8 @@ VOICE_RULES = """\
 You are the Alexa+ voice assistant with the Kinvesper skill, talking with {name} at home.
 Everything you write is spoken aloud by a speaker:
 - Reply in one to three short, warm sentences. No markdown, lists, emoji or headings.
+- Answer just what was asked. Don't bring back earlier topics (like pills not taken yet) unless the
+  question is about them: the care tools send their own reminders.
 - Use the tools for anything about medications, doses, scams, feelings, family or refills. Never
   guess medical facts or the medication schedule.
 - Prefer the tool's `message` or `spoken_summary`, in your own gentle words.
@@ -88,6 +92,10 @@ class TurnResult(BaseModel):
 class Announcement(BaseModel):
     text: str
     tool_calls: list[ToolCall] = []
+
+
+def _blocks(message: dict) -> list:
+    return message["content"] if isinstance(message["content"], list) else []
 
 
 def recent_turns(history: list[dict], turns: int) -> list[dict]:
@@ -334,9 +342,10 @@ class VoiceSession:
         self._utterance = text
         start = len(self.history) - 1
         for step in range(MAX_STEPS):
-            messages = recent_turns(self.history, LOCAL_HISTORY_TURNS) if llm.local() else self.history
+            messages = recent_turns(self.history, LOCAL_HISTORY_TURNS if llm.local() else HISTORY_TURNS)
             try:
-                response = await llm.create_message(system=system, tools=self.tools, messages=messages, max_tokens=4096)
+                response = await llm.create_message(system=system, tools=self.tools, messages=messages,
+                                                    max_tokens=MAX_REPLY_TOKENS)
             except anthropic.APIError as e:
                 log.warning("LLM call failed: %s", e)
                 del self.history[start:]  # drop this whole turn; earlier history is untouched
@@ -351,13 +360,18 @@ class VoiceSession:
                 continue
             uses = [b for b in response.content if b.type == "tool_use"]
             if response.stop_reason != "tool_use" or not uses:
-                return llm.text_of(response) or "Okay."
+                reply = llm.text_of(response) or "Okay."
+                if any(getattr(b, "type", None) == "server_tool_use" for m in self.history[start:] for b in _blocks(m)):
+                    # Search results run to thousands of tokens; later turns only need what was said.
+                    self.history[start + 1:] = [{"role": "assistant", "content": reply}]
+                return reply
             done = await asyncio.gather(*(self._tool_result(u) for u in uses))
             self.history.append({"role": "user", "content": [result for result, _ in done]})
             spoken = [call.spoken for _, call in done]
-            if llm.local() and all(spoken):
-                # Every tool returns a spoken reply built from the real data. A local model skips its slow
-                # second call, and can't misstate doses or claim actions it didn't take.
+            if all(spoken):
+                # Every tool returns a spoken reply built from the real data, so the model's second call
+                # (half the time and tokens of a care question) is skipped. It also can't misstate doses
+                # or claim actions it didn't take.
                 reply = " ".join(spoken)
                 self.history.append({"role": "assistant", "content": reply})
                 return reply

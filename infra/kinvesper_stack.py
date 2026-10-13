@@ -143,6 +143,16 @@ class KinvesperStack(cdk.Stack):
         instance_role = iam.Role(self, "InstanceRole", assumed_by=iam.ServicePrincipal("tasks.apprunner.amazonaws.com"))
         table.grant_read_write_data(instance_role)
         alerts.grant_publish(instance_role)
+        instance_role.add_to_policy(iam.PolicyStatement(
+            sid="CaregiverEmail",  # Settings subscribes the caregiver's email to the alerts topic
+            actions=["sns:Subscribe", "sns:Unsubscribe", "sns:ListSubscriptionsByTopic"],
+            resources=[alerts.topic_arn, f"{alerts.topic_arn}:*"],  # the topic and its subscriptions
+        ))
+        instance_role.add_to_policy(iam.PolicyStatement(
+            sid="CaregiverSms",  # texts to the number in Settings: SMS to a phone number has no resource ARN
+            actions=["sns:Publish"],
+            resources=["*"],
+        ))
         for s in secrets.values():
             s.grant_read(instance_role)
         instance_role.add_to_policy(iam.PolicyStatement(
