@@ -78,6 +78,9 @@ class Settings:
     # Care rules
     missed_dose_grace_min: int = field(default_factory=lambda: int(_env("MISSED_DOSE_GRACE_MIN", "60")))
     inactivity_hours: float = field(default_factory=lambda: float(_env("INACTIVITY_HOURS", "4")))
+    escalate_after_min: int = field(default_factory=lambda: int(_env("ESCALATE_AFTER_MIN", "10")))
+    report_day: str = field(default_factory=lambda: _env("REPORT_DAY", "sunday").lower())  # weekly family email
+    report_time: str = field(default_factory=lambda: _env("REPORT_TIME", "18:00"))
     low_stock_threshold: int = field(default_factory=lambda: int(_env("LOW_STOCK_THRESHOLD", "5")))
     refill_step_seconds: float = field(default_factory=lambda: float(_env("REFILL_STEP_SECONDS", "4")))
     scheduler_interval_s: float = field(default_factory=lambda: float(_env("SCHEDULER_INTERVAL_S", "60")))

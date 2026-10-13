@@ -296,7 +296,7 @@
           h("div", { class: "main" },
             h("div", { class: "title" }, a.title),
             a.detail ? h("div", { class: "detail" }, a.detail) : null,
-            h("div", { class: "meta" }, status(a.level), ` · ${ago(a.created_at)}`, a.notified ? " · sent to caregiver" : "", a.acknowledged ? " · acknowledged" : "")),
+            h("div", { class: "meta" }, status(a.level), ` · ${ago(a.created_at)}`, a.notified ? " · sent to caregiver" : "", a.escalated_at ? " · sent to backup contact" : "", a.acknowledged ? " · acknowledged" : "")),
           a.acknowledged ? null : h("button", { class: "btn", type: "button", onclick: () => ack(a.id) }, "Acknowledge"))))
       : h("p", { class: "empty" }, "No alerts. All quiet.");
 

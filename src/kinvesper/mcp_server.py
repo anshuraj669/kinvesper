@@ -30,6 +30,7 @@ from .icons import AMBER, BLUE, GREEN, PURPLE, RED, SLATE, TEAL, icon
 from .models import (
     CareSummary,
     CheckInResult,
+    ContactResult,
     LogDoseResult,
     Medication,
     MedicationResult,
@@ -194,15 +195,32 @@ def build_server(service: CareService) -> KinvesperMCP:
         description=(
             "Assess a suspicious phone call, text, email or visitor for elder-fraud red flags "
             "(gift cards, wire transfers, 'grandchild in jail', IRS/Medicare threats, secrecy, remote access). "
-            "Automatically alerts the family when risk is high."
+            "Checks the caller's number against the trusted contacts the family saved, to catch impersonators. "
+            "Alerts the family when anything is suspicious."
         ),
         annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True),
     )
     async def check_for_scam(
         description: Annotated[str, Field(description="What the caller or message said, in the person's words")],
+        caller_number: Annotated[str, Field(description="The number they called or texted from, if the person said it")] = "",
     ) -> ScamAssessment:
         service.touch_activity()  # any interaction counts as activity
-        return await service.check_scam(description)
+        return await service.check_scam(description, caller_number)
+
+    @mcp.tool(
+        title="Trusted contact",
+        icons=icon("user", TEAL),
+        description=(
+            "Look up a number the family saved: the bank, doctor, pharmacy or a relative. Use it when the person "
+            "wants to call someone back, or to check who a number belongs to."
+        ),
+        annotations=read_only,
+    )
+    def find_trusted_contact(
+        who: Annotated[str, Field(description="Who they want, e.g. 'my bank', 'Dr. Patel', 'my grandson'")],
+    ) -> ContactResult:
+        service.touch_activity()  # any interaction counts as activity
+        return service.find_contact(who)
 
     @mcp.tool(
         title="Daily check-in",

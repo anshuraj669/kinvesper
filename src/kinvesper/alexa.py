@@ -5,7 +5,8 @@
 Alexa+ add-ons reach /mcp directly, but that tooling is allowlisted. Until then a custom skill
 ("Alexa, open kin vesper") hands each phrase to the same voice agent as the simulator, which calls
 the same MCP tools. A catch-all slot carries the whole utterance; Yes/No answer Kinvesper's
-confirmation questions; Stop and Cancel end the conversation.
+confirmation questions; Stop and Cancel end the conversation. "Set up my pill reminders" asks for the
+reminders permission by voice and has the Echo itself remind the person at every dose time.
 
 Every request is checked as Amazon requires for an HTTPS endpoint: the signing certificate chain
 (from Amazon's S3 bucket, issued to echo-api.amazon.com, trusted root), the SHA-256 signature of the
@@ -35,6 +36,9 @@ from starlette.routing import Route
 
 from . import llm
 from .config import settings
+from .i18n import lang, t
+from .reminders import SCOPE, EchoReminders, spoken_times
+from .service import CareService
 from .voice import VoiceSession, VoiceSessions
 
 log = logging.getLogger(__name__)
@@ -44,14 +48,8 @@ REPLY_DEADLINE_S = 7  # Alexa gives a skill 8 seconds
 SIGNING_HOST = "echo-api.amazon.com"
 MAX_BODY_BYTES = 128 * 1024
 
-WELCOME = ("Hi {name}, it's Kinvesper. You can ask about your pills, tell me you took them, "
-           "check a suspicious call, or send {caregiver} a message.{anything} What would you like?")
-HELP = ("You can say things like: did I take my pills, I just took my {medicine}, someone called asking "
-        "for gift cards, or tell {caregiver} I'm fine.{anything} What would you like?")
-ANYTHING = " Or ask me anything else."
-REPROMPT = "Anything else?"
-GOODBYE = "Goodbye, take care."
-STILL_WORKING = "Let me look into that. Say okay when you'd like the answer."
+REPROMPT = t("en", "reprompt")
+STILL_WORKING = t("en", "still_working")
 
 
 class InvalidRequest(Exception):
@@ -134,6 +132,16 @@ def application_id(request: dict) -> str:
             .get("applicationId", ""))
 
 
+def ask_reminders_permission() -> dict:
+    """Alexa asks the person, by voice, to let Kinvesper set reminders; the answer comes back as a
+    Connections.Response request."""
+    return {"version": "1.0", "response": {"directives": [{
+        "type": "Connections.SendRequest", "name": "AskFor", "token": "",
+        "payload": {"@type": "AskForPermissionsConsentRequest", "@version": "2",
+                    "permissionScopes": [{"permissionScope": SCOPE, "consentLevel": "ACCOUNT"}]},
+    }]}}
+
+
 def speak(text: str, *, end: bool, reprompt: str | None = REPROMPT) -> dict:
     response: dict = {"outputSpeech": {"type": "PlainText", "text": text}, "shouldEndSession": end}
     if not end and reprompt:
@@ -144,8 +152,11 @@ def speak(text: str, *, end: bool, reprompt: str | None = REPROMPT) -> dict:
 class AlexaBridge:
     """One Kinvesper voice session per Alexa session."""
 
-    def __init__(self, sessions: VoiceSessions):
+    def __init__(self, sessions: VoiceSessions, service: CareService | None = None):
         self.sessions = sessions
+        self.service = service
+        self.reminders = EchoReminders(service.store) if service else None
+        self._background: set[asyncio.Task] = set()
         self._by_alexa: dict[str, str] = {}
         # Answers that missed Alexa's deadline, spoken on the person's next turn.
         self._late: dict[str, asyncio.Future] = {}
@@ -168,16 +179,29 @@ class AlexaBridge:
         alexa_id = (body.get("session") or {}).get("sessionId", "")
         one_shot = bool((body.get("session") or {}).get("new")) and kind == "IntentRequest"
 
+        system = (body.get("context") or {}).get("System") or {}
+        locale = request.get("locale") or "en-US"
+
+        def say(key: str, end: bool = False, **values: str) -> dict:
+            return speak(t(locale, key, **values), end=end, reprompt=t(locale, "reprompt"))
+
         if kind == "SessionEndedRequest":
             await self._end(alexa_id)
             return {"version": "1.0", "response": {}}
+        if kind == "Connections.Response" and request.get("name") == "AskFor":
+            scopes = (request.get("payload") or {}).get("permissionScopes") or [{}]
+            if scopes[0].get("status") == "ACCEPTED":
+                return await self._set_reminders(system, locale, ask=False)
+            return say("reminders_declined")
 
         session = await self._session(alexa_id)
-        anything = ANYTHING if llm.enabled() else ""
+        session.language = lang(locale)  # Claude answers in the language the skill is used in
+        anything = t(locale, "anything") if llm.enabled() else ""
         if kind == "LaunchRequest":
-            return speak(WELCOME.format(name=session.patient, caregiver=session.caregiver, anything=anything), end=False)
+            self._refresh_reminders(system, locale)
+            return say("welcome", name=session.patient, caregiver=session.caregiver, anything=anything)
         if kind != "IntentRequest":
-            return speak("Sorry, I can't do that yet.", end=False)
+            return say("cant_do")
 
         intent = request.get("intent") or {}
         name = intent.get("name", "")
@@ -185,14 +209,18 @@ class AlexaBridge:
             if session.awaiting_confirmation:  # a pending "send this to <caregiver>?" counts as no
                 await session.turn("no")
             await self._end(alexa_id)
-            return speak(GOODBYE, end=True)
+            return say("goodbye", end=True)
         if name == "AMAZON.HelpIntent":
             medicine = session.meds[0]["name"] if session.meds else "medicine"
-            return speak(HELP.format(caregiver=session.caregiver, medicine=medicine, anything=anything), end=False)
+            return say("help", caregiver=session.caregiver, medicine=medicine, anything=anything)
         if late := self._late.pop(alexa_id, None):  # whatever they said, they're waiting for this answer
-            return await self._reply(alexa_id, session, late, one_shot=False)
+            return await self._reply(alexa_id, session, late, one_shot=False, locale=locale)
+        if name == "SetUpRemindersIntent":
+            return await self._set_reminders(system, locale, ask=True)
+        if name == "RemoveRemindersIntent":
+            return await self._remove_reminders(system, locale)
         if name == "AMAZON.FallbackIntent":
-            return speak("Sorry, I didn't catch that. Could you say it another way?", end=False)
+            return say("not_caught")
 
         if name == "AMAZON.YesIntent":
             text = "yes"
@@ -202,16 +230,57 @@ class AlexaBridge:
             slots = intent.get("slots") or {}
             text = ((slots.get("utterance") or {}).get("value") or "").strip()
         if not text:
-            return speak("Sorry, I didn't catch that. Could you say it again?", end=False)
+            return say("not_caught")
         log.info("Alexa heard %r", text)
-        return await self._reply(alexa_id, session, asyncio.ensure_future(session.turn(text)), one_shot)
+        return await self._reply(alexa_id, session, asyncio.ensure_future(session.turn(text)), one_shot, locale)
 
-    async def _reply(self, alexa_id: str, session: VoiceSession, turn: asyncio.Future, one_shot: bool) -> dict:
+    async def _set_reminders(self, system: dict, locale: str, ask: bool) -> dict:
+        def say(key: str, **values: str) -> dict:
+            return speak(t(locale, key, **values), end=False, reprompt=t(locale, "reprompt"))
+
+        if self.reminders is None:
+            return say("reminders_unavailable")
+        meds = self.service.medications()
+        if not meds:
+            return say("reminders_no_meds")
+        result = await self.reminders.sync(system, self.service.profile(), meds, locale, force=True)
+        if result.outcome in ("ok", "unchanged"):
+            return say("reminders_set", times=spoken_times(result.times, locale))
+        if result.outcome == "no_permission" and ask:
+            return ask_reminders_permission()
+        if result.outcome == "no_permission":
+            return say("reminders_still_blocked")
+        return say("reminders_failed")
+
+    async def _remove_reminders(self, system: dict, locale: str) -> dict:
+        if self.reminders is None:
+            return speak(t(locale, "reminders_unavailable"), end=False, reprompt=t(locale, "reprompt"))
+        key = "reminders_off" if await self.reminders.clear(system) == "ok" else "reminders_off_failed"
+        return speak(t(locale, key), end=False, reprompt=t(locale, "reprompt"))
+
+    def _refresh_reminders(self, system: dict, locale: str) -> None:
+        """When the skill opens, quietly bring reminders up to date if the medicines changed (only once
+        the person has allowed reminders; never asks)."""
+        if self.reminders is None or not system.get("apiAccessToken"):
+            return
+
+        async def refresh() -> None:
+            try:
+                await self.reminders.sync(system, self.service.profile(), self.service.medications(), locale)
+            except Exception:
+                log.exception("Reminder refresh failed")
+
+        task = asyncio.create_task(refresh())
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+
+    async def _reply(self, alexa_id: str, session: VoiceSession, turn: asyncio.Future, one_shot: bool,
+                     locale: str = "en-US") -> dict:
         try:
             result = await asyncio.wait_for(asyncio.shield(turn), REPLY_DEADLINE_S)
         except TimeoutError:
             self._late[alexa_id] = turn
-            return speak(STILL_WORKING, end=False, reprompt="Say okay to hear the answer.")
+            return speak(t(locale, "still_working"), end=False, reprompt=t(locale, "say_okay"))
         news = " ".join(a.text for a in session.take_announcements())
         reply = f"{news} {result.reply}".strip() if news else result.reply
         log.info("Alexa said %r (%s)", reply, ", ".join(c.name for c in result.tool_calls) or "no tools")
@@ -220,14 +289,14 @@ class AlexaBridge:
         if one_shot:  # "Alexa, ask kin vesper ...": answer and finish, like any one-shot request
             await self._end(alexa_id)
             return speak(reply, end=True)
-        return speak(reply, end=False)
+        return speak(reply, end=False, reprompt=t(locale, "reprompt"))
 
 
-def alexa_routes(sessions: VoiceSessions) -> list[Route]:
+def alexa_routes(sessions: VoiceSessions, service: CareService | None = None) -> list[Route]:
     if not settings.alexa_skill_id:
         return []
     verifier = RequestVerifier(settings.alexa_skill_id)
-    bridge = AlexaBridge(sessions)
+    bridge = AlexaBridge(sessions, service)
 
     async def endpoint(request: Request) -> Response:
         body = await request.body()
@@ -244,7 +313,7 @@ def alexa_routes(sessions: VoiceSessions) -> list[Route]:
             reply = await bridge.handle(payload)
         except Exception:
             log.exception("Alexa request failed")
-            reply = speak("Sorry, I can't reach Kinvesper right now. Please try again in a minute.", end=True)
+            reply = speak(t((payload.get("request") or {}).get("locale"), "unreachable"), end=True)
         log.info("Alexa request %s answered in %.0f ms", payload.get("request", {}).get("type"),
                  (time.perf_counter() - started) * 1000)
         return JSONResponse(reply)

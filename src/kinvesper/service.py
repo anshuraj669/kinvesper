@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import anyio
 
-from . import llm, notify, scam
+from . import contacts, llm, notify, scam
 from .config import now, settings
 from .models import (
     Alert,
@@ -18,6 +18,7 @@ from .models import (
     CareSummary,
     CheckIn,
     CheckInResult,
+    ContactResult,
     DayAdherence,
     DoseLog,
     LogDoseResult,
@@ -28,6 +29,7 @@ from .models import (
     RefillResult,
     ScamAssessment,
     ScheduleItem,
+    TrustedContact,
     ScheduleResult,
 )
 from .store import Store
@@ -85,7 +87,9 @@ def clean_message(text: str, caregiver: str) -> str:
 
 TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 PROFILE_FIELDS = ("patient_name", "preferred_name", "caregiver_name", "caregiver_relation",
-                  "caregiver_phone", "caregiver_email", "pharmacy_name")
+                  "caregiver_phone", "caregiver_email", "backup_name", "backup_phone", "backup_email", "pharmacy_name",
+                  "emergency_number")
+DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
 class SettingsError(ValueError):
@@ -152,11 +156,14 @@ class CareService:
         return {
             "profile": {k: getattr(p, k) for k in PROFILE_FIELDS},
             "medications": [m.model_dump() for m in self.medications()],
+            "contacts": [c.model_dump() for c in self.store.load_all("contact", TrustedContact)],
             "email_status": await notify.email_status(p.caregiver_email),
+            "backup_email_status": await notify.email_status(p.backup_email),
+            "escalate_after_min": settings.escalate_after_min,
             "sms": bool(p.caregiver_phone),
         }
 
-    async def update_settings(self, profile: dict, medications: list[dict]) -> dict:
+    async def update_settings(self, profile: dict, medications: list[dict], trusted: list[dict] | None = None) -> dict:
         """Replace the household's profile and medicine list. Medicines left out are retired, not
         deleted, so their dose history stays. Raises SettingsError for a value that can't be saved."""
         old = self.profile()
@@ -164,11 +171,16 @@ class CareService:
         for k in ("patient_name", "preferred_name", "caregiver_name"):
             if not fields[k]:
                 raise SettingsError(f"{k.replace('_', ' ').capitalize()} is required.")
-        fields["caregiver_phone"] = re.sub(r"[\s\-().]", "", fields["caregiver_phone"])
-        if fields["caregiver_phone"] and not notify.PHONE.match(fields["caregiver_phone"]):
-            raise SettingsError("Phone must include the country code, like +15551234567.")
-        if fields["caregiver_email"] and not notify.EMAIL.match(fields["caregiver_email"]):
-            raise SettingsError("That email address doesn't look right.")
+        for who in ("caregiver", "backup"):
+            fields[f"{who}_phone"] = re.sub(r"[\s\-().]", "", fields[f"{who}_phone"])
+            if fields[f"{who}_phone"] and not notify.PHONE.match(fields[f"{who}_phone"]):
+                raise SettingsError(f"The {who}'s phone must include the country code, like +15551234567.")
+            if fields[f"{who}_email"] and not notify.EMAIL.match(fields[f"{who}_email"]):
+                raise SettingsError(f"The {who}'s email address doesn't look right.")
+        if not re.fullmatch(r"\d{2,6}", fields["emergency_number"]):
+            raise SettingsError("The emergency number should be the short local number, like 112, 911 or 999.")
+        if (fields["backup_phone"] or fields["backup_email"]) and not fields["backup_name"]:
+            raise SettingsError("Add the backup contact's name.")
         if not (fields["caregiver_phone"] or fields["caregiver_email"]):
             raise SettingsError("Add a phone number or an email, so alerts reach the caregiver.")
 
@@ -176,6 +188,7 @@ class CareService:
         meds = [self._medication(m, current) for m in medications]
         if not meds:
             raise SettingsError("Add at least one medicine.")
+        saved_contacts = None if trusted is None else [self._contact(c) for c in trusted]
 
         self.store.save("profile", old.model_copy(update=fields), id="main")
         kept = {m.id for m in meds}
@@ -184,7 +197,14 @@ class CareService:
         for m in current.values():
             if m.active and m.id not in kept:
                 self.store.save("med", m.model_copy(update={"active": False}))
+        if saved_contacts is not None:
+            for c in self.store.load_all("contact", TrustedContact):
+                if c.id not in {x.id for x in saved_contacts}:
+                    self.store.delete("contact", c.id)
+            for c in saved_contacts:
+                self.store.save("contact", c)
         await notify.change_email(old.caregiver_email, fields["caregiver_email"])
+        await notify.change_email(old.backup_email, fields["backup_email"], audience="backup")
         return await self.settings_view()
 
     async def send_test_alert(self) -> Alert:
@@ -192,6 +212,17 @@ class CareService:
         return await self.raise_alert(
             "info", "test", "Test alert",
             f"This is how Kinvesper will reach you, {p.caregiver_name}, when something needs your attention.", sms=True)
+
+    @staticmethod
+    def _contact(data: dict) -> TrustedContact:
+        name = str(data.get("name") or "").strip()
+        phone = re.sub(r"[\s\-().]", "", str(data.get("phone") or ""))
+        if not name:
+            raise SettingsError("Every trusted contact needs a name.")
+        if not re.fullmatch(rf"\+?\d{{{contacts.MIN_DIGITS},15}}", phone):
+            raise SettingsError(f"{name}: the phone number should be digits, with the country code if it has one.")
+        values = {"name": name, "relation": str(data.get("relation") or "").strip(), "phone": phone}
+        return TrustedContact(id=data["id"], **values) if data.get("id") else TrustedContact(**values)
 
     @staticmethod
     def _medication(data: dict, current: dict[str, Medication]) -> Medication:
@@ -449,14 +480,46 @@ class CareService:
             alert_id=alert.id,
             message=(
                 f"I've sent an urgent alert to {p.caregiver_name}. If you're hurt, can't breathe, or have chest pain, "
-                "please call 911 right away. Stay where you are and stay calm. Help is on the way."
+                f"please call {p.emergency_number} right away. Stay where you are and stay calm."
             ),
         )
 
     # ---------- scams ----------
 
-    async def check_scam(self, description: str) -> ScamAssessment:
+    def trusted_contacts(self) -> list[TrustedContact]:
+        """The saved contacts, plus the caregiver (whose number is trusted too)."""
+        saved = sorted(self.store.load_all("contact", TrustedContact), key=lambda c: c.name.lower())
+        p = self.profile()
+        if p.caregiver_phone and not any(contacts.same_number(c.phone, p.caregiver_phone) for c in saved):
+            saved.append(TrustedContact(id="caregiver", name=p.caregiver_name, relation=p.caregiver_relation,
+                                        phone=p.caregiver_phone))
+        return saved
+
+    def find_contact(self, query: str) -> ContactResult:
+        c = contacts.find(query, self.trusted_contacts())
+        if c is None:
+            names = ", ".join(x.name for x in self.trusted_contacts()) or "none yet"
+            return ContactResult(found=False, message=f"I don't have that number saved. Your trusted contacts are: {names}.")
+        return ContactResult(found=True, contact=c, message=f"{c.name}'s number is {contacts.spoken(c.phone)}.")
+
+    async def check_scam(self, description: str, caller_number: str = "") -> ScamAssessment:
         result = await scam.assess(description)
+        verdict, who, flags = contacts.check(description, self.trusted_contacts(), caller_number)
+        result.number_check, result.trusted_contact = verdict, who
+        result.red_flags += flags
+        if who:
+            number = contacts.spoken(who.phone)
+            if verdict == "impersonation":
+                result.risk = "high"
+                result.advice = (f"Please hang up. That call didn't come from {who.name}'s number. If you want to check, "
+                                 f"call {who.name} yourself on {number}. Don't send money or share any details.")
+            elif verdict == "matches":
+                result.advice += (f" The number is {who.name}'s, but callers can fake that. If they ask for money or "
+                                  f"passwords, hang up and call {who.name} back on {number}.")
+            elif verdict == "claims":
+                result.advice += f" If you're not sure, hang up and call {who.name} on the number you trust: {number}."
+        elif verdict == "unknown" and result.risk != "low":
+            result.advice += " That number isn't one of your trusted contacts."
         if result.risk in ("medium", "high"):  # anything suspicious reaches the caregiver
             p = self.profile()
             high = result.risk == "high"
@@ -489,7 +552,7 @@ class CareService:
             await self.raise_alert("info", "checkin", f"{p.preferred_name} is feeling low today", notes)
 
         if serious:
-            msg = f"I'm sorry to hear that. I've told {p.caregiver_name}. If it gets worse or you feel unsafe, please call 911."
+            msg = f"I'm sorry to hear that. I've told {p.caregiver_name}. If it gets worse or you feel unsafe, please call {p.emergency_number}."
         elif mood in ("great", "good"):
             msg = "That's wonderful to hear! I've noted it."
         elif mood == "unwell":
@@ -539,7 +602,58 @@ class CareService:
                     f"Last interaction at {_spoken_dt(p.last_activity)}. Consider giving {p.preferred_name} a call.",
                     dedupe_key=f"inactivity:{p.last_activity}",  # once per quiet spell
                 )
+
+        await self._escalate(current)
+        week = current.isocalendar()
+        if (DAYS[current.weekday()] == settings.report_day and current.strftime("%H:%M") >= settings.report_time
+                and f"report:{week.year}-W{week.week}" not in seen):
+            raised.append(await self.send_weekly_report())
         return raised
+
+    async def _escalate(self, current: datetime) -> None:
+        """Urgent alerts nobody acknowledged in time go to the backup contact, once."""
+        p = self.profile()
+        if not (p.backup_phone or p.backup_email):
+            return
+        cutoff = (current - timedelta(minutes=settings.escalate_after_min)).isoformat()
+        for a in self.alerts(include_acknowledged=False):
+            if a.level != "urgent" or a.escalated_at or a.created_at > cutoff:
+                continue
+            minutes = int((current - datetime.fromisoformat(a.created_at)).total_seconds() // 60)
+            await notify.send(
+                f"Kinvesper: please check on {p.preferred_name}",
+                f"{p.backup_name}, this urgent alert about {p.patient_name} hasn't been answered by "
+                f"{p.caregiver_name} for {minutes} minutes:\n\n{a.title}\n{a.detail}\n\n"
+                f"Please check on {p.preferred_name} or reach {p.caregiver_name}.",
+                phone=p.backup_phone, audience="backup")
+            a.escalated_at = current.isoformat()
+            self.store.save("alert", a)
+
+    async def send_weekly_report(self) -> Alert:
+        """Email the caregiver this week's report (adherence, missed doses, moods, suspicious calls)."""
+        current, p = now(), self.profile()
+        s = await self.summary(7)
+        week = current.isocalendar()
+        start = (current - timedelta(days=6)).strftime("%b %-d")
+        scams = sum(a.kind == "scam" for a in self.alerts() if a.created_at >= (current - timedelta(days=7)).isoformat())
+        missed = "\n".join(f"  - {m}" for m in s.missed[:6]) + (f"\n  - and {len(s.missed) - 6} more" if len(s.missed) > 6 else "")
+        body = (
+            f"Hi {p.caregiver_name},\n\n{s.narrative}\n\n"
+            f"This week ({start} to {current.strftime('%b %-d')})\n"
+            f"- Doses taken: {s.doses_taken} of {s.doses_scheduled} ({round(s.adherence_pct)}%)\n"
+            f"- Missed doses: {len(s.missed)}{chr(10) + missed if s.missed else ''}\n"
+            f"- Moods at check-in: {', '.join(s.recent_moods) or 'no check-ins'}\n"
+            f"- Suspicious calls or messages: {scams}\n"
+            f"- Alerts still open: {s.open_alerts}\n\n"
+            f"Open the Kinvesper dashboard for details.\n— Kinvesper"
+        )
+        alert = Alert(created_at=current.isoformat(), level="info", kind="report",
+                      title=f"Weekly report for {p.caregiver_name}", detail=s.narrative,
+                      dedupe_key=f"report:{week.year}-W{week.week}")
+        alert.notified = await notify.send(f"Kinvesper weekly report: {p.preferred_name}", body)
+        alert.acknowledged = True  # informational: nothing to act on
+        self.store.save("alert", alert)
+        return alert
 
     # ---------- dashboard ----------
 

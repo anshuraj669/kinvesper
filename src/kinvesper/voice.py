@@ -36,7 +36,8 @@ from mcp.shared.experimental.tasks.helpers import MODEL_IMMEDIATE_RESPONSE_KEY
 from mcp.types import CallToolResult, ElicitResult
 from pydantic import BaseModel
 
-from . import llm, speech
+from . import contacts, llm, speech
+from .i18n import LANGUAGES
 from .config import settings
 from .scam import rule_assess
 
@@ -120,6 +121,8 @@ REFILL = re.compile(r"\b(refill|more of my|run(?:ning)? out|order (?:more|my)|ne
 TOOK = re.compile(r"\b(i (?:just )?took|i'?ve (?:just )?taken|i have taken|just had my)\b")
 SCHEDULE = re.compile(r"\b(pills?|medicines?|medications?|meds|tablets?|dose|what'?s next)\b")
 SUMMARY = re.compile(r"\b(summary|report|how was (?:mom|dad|her|his|my|the)(?:'s)? week|this week)\b")
+CALLED = re.compile(r"\b(called|calling|rang|texted|messaged|phoned|says? (?:they'?re|he'?s|she'?s|it'?s) from)\b")
+LOOKUP = re.compile(r"\b(?:what'?s|what is|give me|read me|find)\b.*\bnumber\b|\bnumber (?:for|of)\b|\bcall (?:my|the)\b")
 FEELING = re.compile(r"\b(feel|feeling|lonely|sad|tired|dizzy|sick|unwell|great|wonderful|okay|slept)\b")
 YES = re.compile(r"\b(yes|yeah|yep|sure|please do|go ahead|send it|do it|ok(ay)?|correct|right)\b")
 NO = re.compile(r"\b(no|nope|don'?t|do not|cancel|stop|never ?mind|wait)\b")
@@ -131,9 +134,13 @@ MOODS = [
 ]
 
 
+HINDI_YES = re.compile(r"हाँ|हां|जी|ठीक है|भेज दो|भेजो|ज़रूर|जरूर|बिल्कुल")
+HINDI_NO = re.compile(r"नहीं|नही|मत|रुको|रहने दो")
+
+
 def is_yes(text: str) -> bool:
     t = text.lower()
-    return bool(YES.search(t)) and not NO.search(t)
+    return bool(YES.search(t) or HINDI_YES.search(t)) and not (NO.search(t) or HINDI_NO.search(t))
 
 
 def _mentions_med(text: str, meds: list[dict]) -> bool:
@@ -154,8 +161,10 @@ def route(text: str, meds: list[dict], caregiver: str) -> tuple[str, dict] | Non
         return "notify_caregiver", {"message": body[:1].upper() + body[1:] if body else text}
     if REFILL.search(t):
         return "request_pharmacy_refill", {"medication": text, "fulfillment": "delivery" if "deliver" in t else "pickup"}
-    if rule_assess(t)[2] >= 2:
+    if rule_assess(t)[2] >= 2 or (CALLED.search(t) and contacts.numbers_in(t)):
         return "check_for_scam", {"description": text}
+    if LOOKUP.search(t):
+        return "find_trusted_contact", {"who": text}
     if TOOK.search(t):
         return "log_medication_dose", {"medication": text}
     if SUMMARY.search(t):
@@ -207,6 +216,7 @@ class VoiceSession:
         self.caregiver = "family"
         self.patient = "The person"
         self.history: list[dict] = []
+        self.language = "en"  # i18n.LANGUAGES key; set from the Alexa request's locale
         self.notes: list[str] = []  # background updates for the model, sent with the next user turn
         self.announcements: list[Announcement] = []
         self._calls: list[ToolCall] = []
@@ -328,6 +338,8 @@ class VoiceSession:
         return await self._respond_offline(text)
 
     async def _respond_offline(self, text: str) -> str:
+        if self.language == "hi":  # the keyword router only knows English
+            return "माफ़ कीजिए, अभी मैं हिंदी नहीं समझ पा रहा। कृपया अंग्रेज़ी में बोलिए।"
         choice = route(text, self.meds, self.caregiver)
         if choice is None:
             return (f"I can help with your medicines, check a suspicious call, tell {self.caregiver} something, "
@@ -339,6 +351,11 @@ class VoiceSession:
         notes, self.notes = self.notes, []
         self.history.append({"role": "user", "content": "\n".join([*(f"[Update] {n}" for n in notes), text])})
         system = [{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}]
+        if self.language != "en":  # after the cache breakpoint, so both languages share the cached prefix
+            system.append({"type": "text", "text": (
+                f"Speak {LANGUAGES[self.language]}, in simple everyday words, written in its own script. Keep "
+                "medicine names, numbers and people's names as they are. Tool results are in English: put them "
+                f"into {LANGUAGES[self.language]}.")})
         self._utterance = text
         start = len(self.history) - 1
         for step in range(MAX_STEPS):
@@ -368,7 +385,7 @@ class VoiceSession:
             done = await asyncio.gather(*(self._tool_result(u) for u in uses))
             self.history.append({"role": "user", "content": [result for result, _ in done]})
             spoken = [call.spoken for _, call in done]
-            if all(spoken):
+            if all(spoken) and self.language == "en":  # tool replies are English
                 # Every tool returns a spoken reply built from the real data, so the model's second call
                 # (half the time and tokens of a care question) is skipped. It also can't misstate doses
                 # or claim actions it didn't take.

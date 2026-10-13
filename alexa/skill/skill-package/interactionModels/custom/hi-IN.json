@@ -1,0 +1,317 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "kin vesper",
+      "intents": [
+        {
+          "name": "CatchAllIntent",
+          "slots": [
+            {
+              "name": "utterance",
+              "type": "KinvesperRequest"
+            }
+          ],
+          "samples": [
+            "{utterance}"
+          ]
+        },
+        {
+          "name": "SetUpRemindersIntent",
+          "samples": [
+            "मेरी दवाई के रिमाइंडर सेट करो",
+            "दवाई का रिमाइंडर लगाओ",
+            "मुझे दवाई याद दिलाना",
+            "दवाई लेने की याद दिलाओ",
+            "रिमाइंडर चालू करो",
+            "रिमाइंडर अपडेट करो",
+            "set up my pill reminders"
+          ]
+        },
+        {
+          "name": "RemoveRemindersIntent",
+          "samples": [
+            "रिमाइंडर बंद करो",
+            "दवाई के रिमाइंडर हटाओ",
+            "मुझे रिमाइंडर नहीं चाहिए",
+            "रिमाइंडर रद्द करो"
+          ]
+        },
+        {
+          "name": "AMAZON.YesIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NoIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ],
+      "types": [
+        {
+          "name": "KinvesperRequest",
+          "values": [
+            {
+              "name": {
+                "value": "क्या मैंने दवाई ली"
+              }
+            },
+            {
+              "name": {
+                "value": "क्या मैंने आज की दवाई ली"
+              }
+            },
+            {
+              "name": {
+                "value": "आज मुझे कौन सी दवाई लेनी है"
+              }
+            },
+            {
+              "name": {
+                "value": "अगली दवाई कब है"
+              }
+            },
+            {
+              "name": {
+                "value": "मेरी दवाइयाँ क्या हैं"
+              }
+            },
+            {
+              "name": {
+                "value": "मैंने अभी दवाई ली"
+              }
+            },
+            {
+              "name": {
+                "value": "मैंने सुबह की दवाई ले ली"
+              }
+            },
+            {
+              "name": {
+                "value": "मैंने Metformin ले ली"
+              }
+            },
+            {
+              "name": {
+                "value": "मैंने BP की गोली ले ली"
+              }
+            },
+            {
+              "name": {
+                "value": "मैंने सारी दवाई ले ली"
+              }
+            },
+            {
+              "name": {
+                "value": "किसी ने फ़ोन करके गिफ्ट कार्ड माँगे"
+              }
+            },
+            {
+              "name": {
+                "value": "एक आदमी ने कहा मेरा पोता जेल में है"
+              }
+            },
+            {
+              "name": {
+                "value": "बैंक से फ़ोन आया OTP माँग रहे हैं"
+              }
+            },
+            {
+              "name": {
+                "value": "कोई कह रहा है मेरा खाता बंद हो जाएगा"
+              }
+            },
+            {
+              "name": {
+                "value": "क्या यह कॉल धोखा है"
+              }
+            },
+            {
+              "name": {
+                "value": "किसी ने कहा मेरी लॉटरी लगी है"
+              }
+            },
+            {
+              "name": {
+                "value": "बेटी को बताओ मैं ठीक हूँ"
+              }
+            },
+            {
+              "name": {
+                "value": "प्रिया को बोलो मैं डॉक्टर के पास जा रही हूँ"
+              }
+            },
+            {
+              "name": {
+                "value": "मेरे बेटे को संदेश भेजो"
+              }
+            },
+            {
+              "name": {
+                "value": "परिवार को बताओ मैं घर पहुँच गई"
+              }
+            },
+            {
+              "name": {
+                "value": "मैं आज ठीक हूँ"
+              }
+            },
+            {
+              "name": {
+                "value": "मुझे अकेलापन लग रहा है"
+              }
+            },
+            {
+              "name": {
+                "value": "मुझे चक्कर आ रहे हैं"
+              }
+            },
+            {
+              "name": {
+                "value": "रात को नींद नहीं आई"
+              }
+            },
+            {
+              "name": {
+                "value": "मेरे घुटने में दर्द है"
+              }
+            },
+            {
+              "name": {
+                "value": "मैं बहुत खुश हूँ"
+              }
+            },
+            {
+              "name": {
+                "value": "मेरी दवाई ख़त्म हो रही है"
+              }
+            },
+            {
+              "name": {
+                "value": "दवाई मँगवा दो"
+              }
+            },
+            {
+              "name": {
+                "value": "दवाई घर पर भेज दो"
+              }
+            },
+            {
+              "name": {
+                "value": "नई दवाई चाहिए"
+              }
+            },
+            {
+              "name": {
+                "value": "मैं गिर गई"
+              }
+            },
+            {
+              "name": {
+                "value": "मुझे मदद चाहिए"
+              }
+            },
+            {
+              "name": {
+                "value": "सीने में दर्द है"
+              }
+            },
+            {
+              "name": {
+                "value": "मेरा हफ़्ता कैसा रहा"
+              }
+            },
+            {
+              "name": {
+                "value": "आज मौसम कैसा है"
+              }
+            },
+            {
+              "name": {
+                "value": "आज की ख़बरें सुनाओ"
+              }
+            },
+            {
+              "name": {
+                "value": "एक चुटकुला सुनाओ"
+              }
+            },
+            {
+              "name": {
+                "value": "एक कहानी सुनाओ"
+              }
+            },
+            {
+              "name": {
+                "value": "भजन के बारे में बताओ"
+              }
+            },
+            {
+              "name": {
+                "value": "दाल कैसे बनाते हैं"
+              }
+            },
+            {
+              "name": {
+                "value": "आज कौन सा दिन है"
+              }
+            },
+            {
+              "name": {
+                "value": "दिवाली कब है"
+              }
+            },
+            {
+              "name": {
+                "value": "बैंक का नंबर क्या है"
+              }
+            },
+            {
+              "name": {
+                "value": "मेरे डॉक्टर का नंबर बताओ"
+              }
+            },
+            {
+              "name": {
+                "value": "Taj Mahal कितना पुराना है"
+              }
+            },
+            {
+              "name": {
+                "value": "बीस का दस प्रतिशत कितना है"
+              }
+            },
+            {
+              "name": {
+                "value": "मुझे कोई अच्छी बात बताओ"
+              }
+            }
+          ]
+        }
+      ],
+      "modelConfiguration": {
+        "fallbackIntentSensitivity": {
+          "level": "LOW"
+        }
+      }
+    }
+  }
+}

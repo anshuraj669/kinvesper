@@ -4,14 +4,57 @@ A voice-first eldercare companion for Alexa+, built as a self-hosted **MCP serve
 It helps an older adult who lives alone manage medications, avoid scams and stay connected to family,
 and keeps the family caregiver informed.
 
+- **On any Echo:** "Alexa, open kin vesper", then ask anything: "did I take my pills?", "someone
+  says my grandson needs bail money", "tell Priya I'm fine", "what's the weather today?". In English
+  or Hindi.
+- **The Echo reminds them:** "set up my pill reminders" has Alexa itself announce every dose time.
+- **Scam shield:** red-flag checks plus the family's trusted numbers, to catch callers pretending to
+  be the bank, the doctor or a grandchild.
+- **Family in the loop:** alerts by text and email, a backup contact when nobody answers an urgent
+  alert, a weekly report, and a dashboard where the household is set up.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  person(["Older adult"]) -- voice --> echo["Echo / Alexa+"]
+  echo -- "custom skill (signed requests)" --> bridge["/alexa bridge"]
+  echo -. "Alexa+ add-on (OAuth 2.1)" .-> mcp
+  echo -- "Reminders API: dose-time reminders" --> echo
+  subgraph AppRunner["AWS App Runner: Kinvesper"]
+    bridge --> agent["Voice agent<br/>Claude tool-use loop"]
+    sim["/voice simulator<br/>Transcribe + Polly"] --> agent
+    agent -- "MCP 2025-11-25<br/>tools, elicitation, tasks" --> mcp["/mcp server"]
+    mcp --> care["Care service<br/>doses, scams, contacts, alerts"]
+    dash["/dashboard + settings"] --> care
+  end
+  agent -- "Claude API (web search)" --> claude[("Claude")]
+  care --> db[("DynamoDB")]
+  care -- "texts + email" --> sns["Amazon SNS"] --> family(["Caregiver<br/>and backup contact"])
+  eb["EventBridge, every 5 min"] -- "missed doses, inactivity,<br/>escalation, weekly report" --> care
+  cognito["Cognito"] -. "OAuth 2.1" .- mcp
+  family -- browser --> dash
+```
+
+| Layer | AWS service |
+|---|---|
+| Compute | App Runner (one container: MCP server, Alexa bridge, voice agent, dashboard) |
+| Data | DynamoDB (one table), Secrets Manager (keys and tokens) |
+| Identity | Cognito (OAuth 2.1 for `/mcp` and Alexa+ account linking) |
+| Alerts | SNS (SMS to the phone, email to the caregiver and the backup contact) |
+| Schedules | EventBridge (proactive checks every 5 minutes) |
+| Speech (simulator) | Transcribe (speech to text), Polly (text to speech) |
+| Ops | CloudWatch (logs, a 5xx alarm), ECR (the image) |
+
 ## Quick start
 
 ```bash
 make dev                                  # installs dependencies and starts everything on :8000
 ```
 
-It uses a local [Ollama](https://ollama.com) model when one is running (`ollama pull llama3.1`),
-otherwise the offline keyword router, so it needs no accounts or keys. `make help` lists the other
+It uses Claude when `ANTHROPIC_API_KEY` is in `.env` (see `.env.example`), else a local
+[Ollama](https://ollama.com) model when one is running (`ollama pull llama3.1`), else the offline
+keyword router, so it needs no accounts or keys. `make help` lists the other
 commands (`make test`, `make seed`, `make dev-aws`). Step by step instead:
 
 ```bash
@@ -39,7 +82,8 @@ npx @modelcontextprotocol/inspector      # transport: Streamable HTTP, URL: http
 | `get_medication_schedule` | Today's doses with status (taken / due / missed / upcoming); ask about one med by name or purpose |
 | `log_medication_dose` | Logs a dose, with a **double-dose guard** |
 | `add_medication` | Adds a prescription |
-| `check_for_scam` | Elder-fraud red-flag check; alerts family on high risk |
+| `check_for_scam` | Elder-fraud red-flag check plus the caller's number against the trusted contacts; alerts family on anything suspicious |
+| `find_trusted_contact` | The bank's, doctor's or a relative's real number, as the family saved it |
 | `daily_check_in` | Mood and symptoms; escalates falls, dizziness and chest pain |
 | `notify_caregiver` | Sends a message to the caregiver |
 | `emergency_help` | Sends an urgent alert immediately |
@@ -122,22 +166,68 @@ alerts topic (saving an email subscribes it; Amazon sends a confirmation link). 
 checks both. Anything suspicious alerts: medium-risk scam checks as a warning, high-risk as urgent,
 as well as emergencies, worrying check-ins and messages.
 
-A scheduler inside the server runs every `SCHEDULER_INTERVAL_S` seconds:
+Settings also holds:
 
-| Check | Alert | Texted |
+- **A backup contact.** An urgent alert (a fall, chest pain, a likely scam) that nobody acknowledges
+  within `ESCALATE_AFTER_MIN` minutes (10) goes to them too, once.
+- **Trusted contacts:** the real numbers of the bank, the doctor and family. "Someone from my bank
+  called from 98 4123 9999" is checked against the bank's saved number; a different number is an
+  impersonation (high risk, the caregiver is alerted, and Kinvesper reads out the real number to
+  call back on). A matching number never lowers the risk: caller ID can be faked.
+- **Send weekly report now,** besides the automatic one.
+
+A scheduler inside the server runs every `SCHEDULER_INTERVAL_S` seconds (in the cloud, EventBridge
+calls it every 5 minutes):
+
+| Check | Alert | Sent to the caregiver |
 |---|---|---|
 | Dose not logged `MISSED_DOSE_GRACE_MIN` after its time | warning | yes |
 | No interaction for `INACTIVITY_HOURS` (08:00-21:00 only) | warning | yes |
 | `LOW_STOCK_THRESHOLD` pills or fewer, no refill underway | info | no |
+| Urgent alert unacknowledged for `ESCALATE_AFTER_MIN` | to the backup contact | backup |
+| `REPORT_DAY` after `REPORT_TIME` (Sunday 18:00): the weekly report, written by Claude | info | email |
 
 Every alert carries a de-duplication key, so a missed dose texts the caregiver once, however
 often the checks run. `uv run kinvesper --check` runs them once, for cron or EventBridge.
 With OAuth on, the dashboard needs `DASHBOARD_KEY` (`/dashboard?key=...`).
 
+## On Alexa
+
+The classic skill in `alexa/skill` reaches Kinvesper from any Echo today (the Alexa+ add-on in
+`alexa/addon-package` waits on Amazon's allowlist). See [alexa/README.md](alexa/README.md).
+
+- **Echo reminders:** "set up my pill reminders" asks for the reminders permission by voice, then
+  creates one daily reminder per dose time with the Alexa Reminders API ("Margaret, it's time for
+  your Metformin, 500 mg, and Lisinopril... take with food"). When the medicines change in Settings,
+  the reminders are rebuilt the next time the skill opens. "Turn off my reminders" removes them.
+- **Hindi:** the skill has a hi-IN model. The fixed phrases are translated, times are spoken the
+  Hindi way ("रात 8 बजे"), and Claude answers in Hindi.
+- **Anything else:** questions outside care (facts, recipes, maths, the weather, the news) are
+  answered by Claude, with web search for today's information.
+
+## Responsible AI
+
+- **Not a doctor.** Kinvesper never diagnoses or changes doses. Medication facts come only from the
+  schedule the family saved, through the tools; Claude doesn't guess them. Care questions are
+  answered with the tool's own spoken reply, built from the real data, so doses can't be misstated.
+- **Double-dose guard.** Logging a dose that's already taken says clearly: don't take another.
+- **Emergencies:** "I fell" or "chest pain" alerts the family at once and tells the person to call
+  the local emergency number (set in Settings: 112, 911, 999...). Kinvesper doesn't contact
+  emergency services itself, and never claims help is on the way.
+- **Asks before acting for the person.** Messages to family need a spoken yes (MCP elicitation).
+  Scam and emergency alerts never ask, because scammers push secrecy.
+- **Caller ID can be faked,** so a known number never makes a call "safe": Kinvesper says to call
+  back on the saved number before doing anything.
+- **Privacy:** health data stays in the family's own AWS account (DynamoDB, encrypted at rest). The
+  dashboard needs a key; `/mcp` needs OAuth. Alexa sends text, never audio. Keys live in Secrets
+  Manager, never in the code or the image. The privacy policy is at `/privacy`.
+- **Honest failure:** if Claude is unreachable, the keyword router still handles the core care
+  actions; a failed text never stops the email; nothing pretends a message was sent when it wasn't.
+
 ## Deploying to AWS
 
-`infra/` holds a CDK stack that deploys Kinvesper on App Runner with DynamoDB, Bedrock, Cognito
-(OAuth 2.1), SNS, Secrets Manager, EventBridge and CloudWatch. Steps: [infra/README.md](infra/README.md).
+`infra/` holds a CDK stack that deploys Kinvesper on App Runner with DynamoDB, Cognito (OAuth 2.1),
+SNS, Secrets Manager, EventBridge and CloudWatch, with Claude through the Claude API (or Bedrock). Steps: [infra/README.md](infra/README.md).
 
 To run on your own machine against the deployed stack (same DynamoDB table and SNS topic as the
 cloud app) with a local Ollama model, after `aws configure`:
@@ -173,6 +263,11 @@ src/kinvesper/
   auth.py         OAuth 2.1 resource server: JWT verification against Cognito
   icons.py        SVG icons for tools, resources and prompts
   voice.py        voice agent: Claude tool-use loop over MCP, offline router, spoken elicitation
+  alexa.py        Alexa skill bridge (/alexa): Amazon's request checks, sessions, reminders
+  reminders.py    Echo pill reminders through the Alexa Reminders API
+  i18n.py         the skill's fixed phrases in English and Hindi
+  contacts.py     trusted contacts: phone number matching and impersonation checks
+  listing.py      privacy and terms pages, store icons
   web.py          voice simulator routes (/voice, /api/voice/...)
   dashboard.py    caregiver dashboard routes (/dashboard, /api/dashboard, ...)
   scheduler.py    proactive checks on a timer (missed doses, inactivity, low stock)
@@ -193,8 +288,10 @@ Details and the AWS services per phase are in [PHASES.md](PHASES.md).
 - [x] **Phase 2:** Tasks (async pharmacy refill), elicitation (confirm before messaging family), icons, OAuth 2.1
 - [x] **Phase 3:** Alexa+-style voice simulator web app with a Claude agent
 - [x] **Phase 4:** caregiver dashboard, missed-dose and inactivity scheduler, SNS SMS
-- [ ] **Phase 5:** AWS deployment (DynamoDB, Docker, CDK). Built and tested locally; `cdk deploy` pending
-- [ ] **Phase 6:** demo polish (architecture diagram, spec-compliance table, demo script)
+- [x] **Phase 5:** AWS deployment (App Runner, DynamoDB, Cognito, SNS, EventBridge, CDK)
+- [x] **Phase 6:** Alexa skill bridge, Claude API brain with web search, household settings,
+  trusted contacts, escalation to a backup contact, weekly report, Echo reminders, Hindi
+- [ ] **Next:** WhatsApp alerts, multi-family accounts, Alexa+ add-on (waiting on the allowlist)
 
 ## License
 

@@ -105,11 +105,28 @@ Alexa app and the developer console's simulator:
 - Yes and No answer Kinvesper's confirmation questions; Stop or Cancel during "Send this to
   Priya?" cancels the message. "Alexa, ask kin vesper ..." answers and ends the session.
 
+- **Echo reminders:** "set up my pill reminders" (`SetUpRemindersIntent`) asks for the reminders
+  permission by voice (`Connections.SendRequest` AskFor), then creates one daily reminder per dose
+  time with the Alexa Reminders API. The medicine list stays in Kinvesper, so when it changes in
+  Settings, the reminders are rebuilt the next time the skill opens. "Turn off my reminders"
+  (`RemoveRemindersIntent`) deletes them. Test on an Echo or the Alexa app: the console simulator
+  doesn't play reminders.
+- **Hindi (hi-IN):** the same intents with Hindi samples. The bridge speaks Hindi for its own
+  phrases, and Claude answers in Hindi (tool results are translated, so care answers take one more
+  model call).
+
 Set it up in the [developer console](https://developer.amazon.com/alexa/console/ask): create a
 custom skill, paste `interactionModels/custom/en-US.json` into **Interaction Model → JSON Editor**,
 build it, and set **Endpoint → HTTPS** to `https://<service>/alexa` ("My development endpoint is a
 sub-domain of a domain that has a wildcard certificate": App Runner serves `*.<region>.awsapprunner.com`,
-and with the "trusted certificate" option Alexa fails the TLS check and says "unable to reach the requested skill"). Or with the ASK CLI (`npm install -g ask-cli`, `ask configure`):
+and with the "trusted certificate" option Alexa fails the TLS check and says "unable to reach the requested skill"). Then:
+
+1. **Permissions** (left menu, under Tools): turn on **Reminders**.
+2. **Hindi:** in the language dropdown at the top left, **Language settings → Add new language →
+   Hindi (IN)**, save, then switch to Hindi, paste `interactionModels/custom/hi-IN.json` into its
+   JSON Editor, build, and set the same endpoint. Test it by switching the Test tab to Hindi.
+
+Or with the ASK CLI (`npm install -g ask-cli`, `ask configure`), which deploys all of it:
 
 ```bash
 cd alexa/skill && ask deploy

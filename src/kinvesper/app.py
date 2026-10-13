@@ -56,7 +56,7 @@ def create_app(service: CareService | None = None, voice: VoiceSessions | None =
 
     routes = [
         Route("/health", health), *metadata_routes(settings), *voice_routes(voice), *dashboard_routes(service),
-        *listing_routes(), *alexa_routes(voice),
+        *listing_routes(), *alexa_routes(voice, service),
         Mount("/", app=mcp_app),
     ]
     app = Starlette(routes=routes, lifespan=lifespan)

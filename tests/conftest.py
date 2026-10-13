@@ -6,6 +6,8 @@ import subprocess
 import sys
 import time
 
+import json
+
 import httpx
 import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -109,3 +111,43 @@ def auth_server(tmp_path_factory):
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+
+
+# ---------- Alexa Reminders API ----------
+
+SYSTEM = {"apiEndpoint": "https://api.amazonalexa.com", "apiAccessToken": "token-123",
+          "user": {"userId": "amzn1.ask.account.TEST"}}
+
+
+class FakeRemindersApi:
+    """The Alexa Reminders API, in memory."""
+
+    def __init__(self, allowed=True):
+        self.allowed = allowed
+        self.reminders: dict[str, dict] = {}
+        self.calls: list[str] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.calls.append(f"{request.method} {request.url.path}")
+        assert request.headers["authorization"] == "Bearer token-123"
+        if not self.allowed:
+            return httpx.Response(403, json={"code": "UNAUTHORIZED"})
+        if request.method == "POST":
+            token = f"alert-{len(self.reminders) + len(self.calls)}"
+            self.reminders[token] = json.loads(request.content)
+            return httpx.Response(201, json={"alertToken": token})
+        if request.method == "DELETE":
+            self.reminders.pop(request.url.path.rsplit("/", 1)[1], None)
+            return httpx.Response(204)
+        return httpx.Response(405)
+
+
+
+@pytest.fixture
+def reminders_api():
+    return FakeRemindersApi()
+
+
+@pytest.fixture
+def alexa_system():
+    return SYSTEM

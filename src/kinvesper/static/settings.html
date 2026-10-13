@@ -49,6 +49,7 @@
   .card .sub { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
   .grid { display: grid; gap: 12px 16px; grid-template-columns: repeat(2, 1fr); }
   .grid .wide { grid-column: 1 / -1; }
+  .grid.three { grid-template-columns: 2fr 1.4fr 1.6fr; }
   label { display: grid; gap: 4px; align-content: start; font-size: 13px; font-weight: 600; color: var(--ink-2); }
   label .hint { font-weight: 400; font-size: 12px; color: var(--muted); }
   input {
@@ -71,7 +72,7 @@
   .empty { color: var(--muted); font-size: 14px; }
   @media (max-width: 640px) {
     main { padding: 16px 16px 120px; }
-    .grid { grid-template-columns: 1fr; }
+    .grid, .grid.three { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -149,17 +150,30 @@
         field("Instructions", m, "instructions", { placeholder: "take with food", wide: true })));
   }
 
+  function contactRow(c, i) {
+    return h("div", { class: "med" },
+      h("div", { class: "med-head" }, h("strong", {}, c.name || `Contact ${i + 1}`),
+        h("button", { class: "btn quiet", type: "button", onclick: () => { state.contacts.splice(i, 1); dirty(); render(); } }, "Remove")),
+      h("div", { class: "grid three" },
+        field("Name", c, "name", { placeholder: "State Bank of India" }),
+        field("Who they are", c, "relation", { placeholder: "bank, doctor, grandson" }),
+        field("Phone", c, "phone", { type: "tel", placeholder: "+91 98412 37777" })));
+  }
+
   function render() {
     const p = state.profile;
     const [tone, text] = EMAIL[state.email_status] || EMAIL.unknown;
+    const [btone, btext] = EMAIL[state.backup_email_status] || EMAIL.unknown;
     const testBtn = h("button", { class: "btn", type: "button", onclick: testAlert }, "Send test alert");
+    const reportBtn = h("button", { class: "btn", type: "button", onclick: weeklyReport }, "Send weekly report now");
     document.getElementById("main").replaceChildren(
       h("section", { class: "card" }, h("h2", {}, "The person"),
         h("p", { class: "sub" }, "Who Kinvesper talks with. The short name is what it calls them."),
         h("div", { class: "grid" },
           field("Full name", p, "patient_name", { required: true }),
           field("Called", p, "preferred_name", { required: true, placeholder: "first name or nickname" }),
-          field("Pharmacy", p, "pharmacy_name", { wide: true }))),
+          field("Pharmacy", p, "pharmacy_name"),
+          field("Emergency number", p, "emergency_number", { inputmode: "numeric", placeholder: "112", hint: "what Kinvesper tells them to call" }))),
       h("section", { class: "card" }, h("h2", {}, "Caregiver"),
         h("p", { class: "sub" }, "Suspicious calls, emergencies, missed doses and messages go to this phone and email."),
         h("div", { class: "grid" },
@@ -169,7 +183,19 @@
           field("Email", p, "caregiver_email", { type: "email", placeholder: "name@example.com", autocomplete: "email" })),
         p.caregiver_email ? note(tone, text) : null,
         p.caregiver_phone ? note("muted", "Texts from a new AWS account only reach numbers verified in the SNS SMS sandbox.") : null,
-        h("div", { class: "row" }, testBtn)),
+        h("div", { class: "row" }, testBtn, reportBtn)),
+      h("section", { class: "card" }, h("h2", {}, "Backup contact"),
+        h("p", { class: "sub" }, `If an urgent alert (a fall, chest pain, a likely scam) isn't acknowledged within ${state.escalate_after_min} minutes, it goes to this person too.`),
+        h("div", { class: "grid" },
+          field("Name", p, "backup_name", { placeholder: "a neighbour or another relative", wide: true }),
+          field("Phone", p, "backup_phone", { type: "tel", placeholder: "+15551234567", hint: "with country code" }),
+          field("Email", p, "backup_email", { type: "email", placeholder: "name@example.com" })),
+        p.backup_email ? note(btone, btext) : null),
+      h("section", { class: "card" }, h("h2", {}, "Trusted contacts"),
+        h("p", { class: "sub" }, "Real numbers for the bank, doctor and family. When a caller claims to be one of them from another number, Kinvesper says to hang up and gives the real number."),
+        state.contacts.length ? state.contacts.map(contactRow) : h("p", { class: "empty" }, "No trusted contacts yet."),
+        h("div", { class: "row" }, h("button", { class: "btn", type: "button",
+          onclick: () => { state.contacts.push({ name: "", relation: "", phone: "" }); dirty(); render(); } }, "Add contact"))),
       h("section", { class: "card" }, h("h2", {}, "Medicines"),
         h("p", { class: "sub" }, "Kinvesper reminds, logs doses and orders refills from this list."),
         state.medications.length ? state.medications.map(medCard) : h("p", { class: "empty" }, "No medicines yet."),
@@ -190,7 +216,7 @@
     save.disabled = true;
     say("Saving…");
     try {
-      state = await call("PUT", "/api/settings", { profile: state.profile, medications: state.medications });
+      state = await call("PUT", "/api/settings", { profile: state.profile, medications: state.medications, contacts: state.contacts });
       render();
       say(state.email_status === "pending" ? "Saved. Check the caregiver's inbox to confirm alert emails." : "Saved.");
     } catch (e) {
@@ -204,9 +230,20 @@
     say("Sending…");
     try {
       const r = await call("POST", "/api/settings/test-alert");
-      state = { ...state, email_status: r.email_status };
+      state = { ...state, email_status: r.email_status, backup_email_status: r.backup_email_status };
       render();
       say(r.sent ? "Test alert sent." : "Nothing was sent: alerts are only logged here.", !r.sent);
+    } catch (e) {
+      say(e.message, true);
+    }
+  }
+
+  async function weeklyReport() {
+    if (!save.disabled) return say("Save your changes first.", true);
+    say("Writing the report…");
+    try {
+      const r = await call("POST", "/api/reports/weekly");
+      say(r.sent ? "Weekly report emailed." : "Report written, but nothing was sent: alerts are only logged here.", !r.sent);
     } catch (e) {
       say(e.message, true);
     }

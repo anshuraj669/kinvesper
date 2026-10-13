@@ -4,8 +4,9 @@
     GET  /dashboard/settings         the settings page: the person, the caregiver's contact, the medicines
     GET  /api/dashboard              everything the page shows, in one call
     GET  /api/settings               the household's settings
-    PUT  /api/settings               save them ({"profile": {...}, "medications": [...]})
+    PUT  /api/settings               save them ({"profile": {...}, "medications": [...], "contacts": [...]})
     POST /api/settings/test-alert    send a test alert to the caregiver's phone and email
+    POST /api/reports/weekly         email the caregiver this week's report now
     POST /api/alerts/{id}/ack        acknowledge an alert
     POST /api/checks                 run the proactive checks now (demo button)
 
@@ -62,9 +63,18 @@ def dashboard_routes(service: CareService) -> list[Route]:
             body = await request.json()
             if not isinstance(body, dict) or not isinstance(body.get("medications"), list):
                 raise SettingsError("Send a profile and a list of medicines.")
-            return JSONResponse(await service.update_settings(body.get("profile") or {}, body["medications"]))
+            trusted = body.get("contacts")
+            if trusted is not None and not isinstance(trusted, list):
+                raise SettingsError("Send the trusted contacts as a list.")
+            return JSONResponse(await service.update_settings(body.get("profile") or {}, body["medications"], trusted))
         except (SettingsError, ValueError) as e:
             return JSONResponse({"error": str(e) if isinstance(e, SettingsError) else "Invalid request"}, status_code=400)
+
+    async def weekly_report(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        alert = await service.send_weekly_report()
+        return JSONResponse({"sent": alert.notified, "summary": alert.detail})
 
     async def test_alert(request: Request) -> Response:
         if denied := guard(request):
@@ -96,6 +106,7 @@ def dashboard_routes(service: CareService) -> list[Route]:
         Route("/api/dashboard", data),
         Route("/api/settings", household, methods=["GET", "PUT"]),
         Route("/api/settings/test-alert", test_alert, methods=["POST"]),
+        Route("/api/reports/weekly", weekly_report, methods=["POST"]),
         Route("/api/alerts/{alert_id}/ack", ack, methods=["POST"]),
         Route("/api/checks", checks, methods=["POST"]),
     ]

@@ -26,8 +26,22 @@ class Profile(BaseModel):
     caregiver_relation: str = "daughter"
     caregiver_phone: str = ""  # E.164; alerts are texted here
     caregiver_email: str = ""  # alerts are emailed here once the caregiver confirms Amazon's link
+    # Backup contact: gets urgent alerts nobody acknowledged within ESCALATE_AFTER_MIN minutes.
+    backup_name: str = ""
+    backup_phone: str = ""
+    backup_email: str = ""
     pharmacy_name: str = "Main Street Pharmacy"
+    emergency_number: str = "911"  # what Kinvesper tells them to call: 112 in India and the EU, 999 in the UK
     last_activity: str | None = None  # ISO timestamp of the last voice interaction
+
+
+class TrustedContact(BaseModel):
+    """A number the caregiver vouches for (bank, doctor, family), to catch callers pretending to be them."""
+
+    id: str = Field(default_factory=lambda: new_id("contact"))
+    name: str = Field(description="Who it is, e.g. 'State Bank of India', 'Dr. Patel', 'Ravi'")
+    relation: str = Field(default="", description="What they are to the person, e.g. 'bank', 'doctor', 'grandson'")
+    phone: str
 
 
 class Medication(BaseModel):
@@ -53,7 +67,7 @@ class DoseLog(BaseModel):
 
 AlertLevel = Literal["info", "warning", "urgent"]
 AlertKind = Literal[
-    "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock", "test"
+    "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock", "test", "report"
 ]
 
 
@@ -67,6 +81,7 @@ class Alert(BaseModel):
     dedupe_key: str | None = None
     notified: bool = False
     acknowledged: bool = False
+    escalated_at: str | None = None  # when it went to the backup contact, unacknowledged
 
 
 RefillStatus = Literal["requested", "contacting_pharmacy", "verifying", "approved", "ready", "failed"]
@@ -142,6 +157,16 @@ class ScamAssessment(BaseModel):
     red_flags: list[str]
     advice: str
     family_alerted: bool = False
+    number_check: Literal["impersonation", "matches", "unknown", "claims", "none"] = Field(
+        default="none", description="The caller's number against the trusted contacts")
+    trusted_contact: TrustedContact | None = Field(
+        default=None, description="The saved contact they claimed to be, or whose number it is")
+
+
+class ContactResult(BaseModel):
+    found: bool
+    contact: TrustedContact | None = None
+    message: str
 
 
 class NotifyResult(BaseModel):

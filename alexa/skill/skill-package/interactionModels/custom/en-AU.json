@@ -16,6 +16,33 @@
           ]
         },
         {
+          "name": "SetUpRemindersIntent",
+          "samples": [
+            "set up my reminders",
+            "set up my pill reminders",
+            "set up medicine reminders",
+            "remind me to take my pills",
+            "remind me to take my medicine",
+            "remind me about my medicines",
+            "turn on my reminders",
+            "turn on pill reminders",
+            "start my pill reminders",
+            "update my reminders"
+          ]
+        },
+        {
+          "name": "RemoveRemindersIntent",
+          "samples": [
+            "turn off my reminders",
+            "turn off pill reminders",
+            "stop my pill reminders",
+            "cancel my reminders",
+            "remove my reminders",
+            "delete my pill reminders",
+            "I don't want reminders"
+          ]
+        },
+        {
           "name": "AMAZON.YesIntent",
           "samples": []
         },

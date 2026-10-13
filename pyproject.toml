@@ -34,6 +34,7 @@ packages = ["src/kinvesper"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["tests"]  # tests share fakes through conftest
 # mcp 1.30 flags its experimental Tasks API as going away in 2.x; we pin 1.30 on purpose.
 filterwarnings = ["ignore:The experimental tasks API is deprecated:DeprecationWarning"]
 [dependency-groups]
