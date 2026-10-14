@@ -97,6 +97,53 @@
     padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none;
   }
   .error { grid-column: 1 / -1; color: var(--critical); }
+  header .title { display: flex; flex-direction: column; min-width: 0; }
+  header .who { font-size: 13px; }
+  .actions { display: flex; gap: 8px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; }
+  .btn svg { width: 16px; height: 16px; flex: none; }
+  .btn.small { font-size: 13px; padding: 5px 10px; }
+  .updated { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  /* status banner: how things are, in one sentence */
+  .banner { grid-column: 1 / -1; display: flex; gap: 14px; align-items: center; padding: 16px 20px; border-radius: 14px;
+    border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow); }
+  .banner .icon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+  .banner .icon svg { width: 22px; height: 22px; }
+  .banner h2 { margin: 0; font-size: 18px; font-weight: 650; }
+  .banner p { margin: 2px 0 0; color: var(--ink-2); font-size: 14px; }
+  .banner .grow { flex: 1; min-width: 0; }
+  .banner.good .icon { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+  .banner.warning { border-color: color-mix(in srgb, var(--warning) 55%, var(--line)); }
+  .banner.warning .icon { background: color-mix(in srgb, var(--warning) 22%, transparent); color: #9a6700; }
+  .banner.critical { border-color: var(--critical); background: color-mix(in srgb, var(--critical) 7%, var(--panel)); }
+  .banner.critical .icon { background: var(--critical); color: #fff; }
+  .setup { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 16px; border-radius: 12px;
+    background: color-mix(in srgb, var(--warning) 14%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--line)); font-size: 14px; }
+  .setup strong { font-weight: 650; }
+  /* alert filters */
+  .card-head { display: flex; align-items: flex-start; gap: 10px; }
+  .card-head .grow { flex: 1; min-width: 0; }
+  .tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-bottom: 12px; }
+  .tabs button { font: inherit; font-size: 13px; font-weight: 600; padding: 5px 12px; border: none; background: none; color: var(--ink-2); cursor: pointer; }
+  .tabs button[aria-pressed="true"] { background: var(--brand-soft); color: var(--brand); }
+  .kind { font-size: 11.5px; font-weight: 650; padding: 1px 7px; border-radius: 999px; background: var(--wash); color: var(--ink-2); margin-left: 6px; vertical-align: 1px; }
+  .rows li.urgent { border-left: 3px solid var(--critical); padding-left: 10px; margin-left: -13px; }
+  /* today */
+  .progress { height: 8px; border-radius: 999px; background: var(--wash); overflow: hidden; margin: 2px 0 12px; }
+  .progress span { display: block; height: 100%; background: var(--good); border-radius: 999px; }
+  .next { padding: 10px 12px; border-radius: 10px; background: var(--brand-soft); margin-bottom: 12px; font-size: 14px; }
+  .next strong { font-weight: 650; }
+  .card .sub a { color: var(--brand); font-weight: 600; text-decoration: none; }
+  .card .sub a:hover { text-decoration: underline; }
+  .report { white-space: pre-line; color: var(--ink-2); margin: 0 0 12px; }
+  @media (max-width: 900px) {
+    header { padding: 12px 16px; gap: 8px; flex-wrap: nowrap; }
+    header h1 span, .actions .label, .updated { display: none; }
+    .actions .btn { padding: 8px 10px; }
+    .banner { padding: 14px 16px; }
+    .banner { flex-wrap: wrap; }
+    .banner .act { width: 100%; justify-content: center; padding: 10px; }
+  }
   @media (max-width: 900px) {
     main { grid-template-columns: repeat(2, 1fr); padding: 16px; }
     .span-3 { grid-column: span 1; }
@@ -107,12 +154,26 @@
 </head>
 <body>
 <header>
-  <h1>Kinvesper <span>· caregiver dashboard</span></h1>
-  <span class="who" id="who"></span>
+  <div class="title">
+    <h1>Kinvesper <span>· caregiver dashboard</span></h1>
+    <span class="who" id="who"></span>
+  </div>
   <div class="spacer"></div>
-  <button class="btn" id="runChecks" type="button">Run checks now</button>
-  <a class="btn" id="settings" href="/dashboard/settings">Settings</a>
-  <a class="btn primary" href="/voice">Voice simulator</a>
+  <span class="updated" id="updated" aria-live="off"></span>
+  <nav class="actions" aria-label="Dashboard actions">
+    <button class="btn" id="runChecks" type="button" title="Run the missed-dose, inactivity and reminder checks now">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+      <span class="label">Run checks</span>
+    </button>
+    <a class="btn" id="settings" href="/dashboard/settings" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      <span class="label">Settings</span>
+    </a>
+    <a class="btn primary" href="/voice" title="Voice simulator">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      <span class="label">Voice simulator</span>
+    </a>
+  </nav>
 </header>
 <main id="main" aria-live="polite"><p class="empty">Loading…</p></main>
 <div class="toast" id="toast" role="status"></div>
@@ -288,29 +349,134 @@
     if (r.ok) { toast("Alert acknowledged"); load(); }
   }
 
+  const KIND = {
+    missed_dose: "Missed dose", scam: "Scam", inactivity: "Quiet", emergency: "Emergency", refill: "Refill",
+    caregiver_message: "Message", checkin: "Check-in", low_stock: "Low stock", test: "Test", report: "Report", reminder: "Reminder",
+  };
+  const BANNER_ICON = {
+    good: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 7v6M12 17h.01"/></svg>',
+    critical: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8M12 18h.01"/></svg>',
+  };
+  let alertView = "open";  // which alerts to list, kept across refreshes
+  let loadedAt = null;
+
+  async function ackAll(ids) {
+    await Promise.all(ids.map((id) => fetch(`/api/alerts/${id}/ack`, { method: "POST", headers })));
+    toast(`${ids.length} alert${ids.length > 1 ? "s" : ""} acknowledged`);
+    load();
+  }
+
+  function banner(d, today, openAlerts) {
+    const p = d.profile, name = p.preferred_name;
+    const urgent = openAlerts.filter((a) => a.level === "urgent");
+    const warnings = openAlerts.filter((a) => a.level === "warning");
+    const taken = today.filter((i) => i.status === "taken").length;
+    const missed = today.filter((i) => i.status === "missed").length;
+    const next = today.find((i) => i.status === "due" || i.status === "upcoming");
+    const facts = [`${taken} of ${today.length} doses taken today`,
+      next ? `next: ${next.medication} at ${clock(next.time)}` : "no more doses today",
+      `last active ${ago(p.last_activity)}`].join(" · ");
+    let tone, title, action = null;
+    if (urgent.length) {
+      tone = "critical"; title = urgent[0].title;
+      action = h("button", { class: "btn primary act", type: "button", onclick: () => ack(urgent[0].id) }, "Acknowledge");
+    } else if (warnings.length || missed) {
+      tone = "warning";
+      const bits = [warnings.length && `${warnings.length} alert${warnings.length > 1 ? "s" : ""} to look at`,
+        missed && `${missed} missed dose${missed > 1 ? "s" : ""} today`].filter(Boolean);
+      title = `${name} needs a little attention: ${bits.join(" and ")}`;
+    } else {
+      tone = "good"; title = `${name} is doing well today`;
+    }
+    const b = h("section", { class: `banner ${tone}`, role: tone === "critical" ? "alert" : "status" });
+    const icon = h("div", { class: "icon" }); icon.innerHTML = BANNER_ICON[tone];
+    b.append(icon, h("div", { class: "grow" }, h("h2", {}, title), h("p", {}, urgent.length ? urgent[0].detail.split("\n")[0] : facts)));
+    if (action) b.append(action);
+    return b;
+  }
+
+  function setupNotice(d) {
+    const reach = d.alerts_reach || {};
+    if (reach.phone || reach.email) return null;
+    const link = h("a", { class: "btn small", href: document.getElementById("settings").href }, "Add a phone or email");
+    return h("div", { class: "setup", role: "note" },
+      h("strong", {}, "Alerts aren't reaching anyone yet."),
+      h("span", {}, `Kinvesper can't text or email ${d.profile.caregiver_name} until a contact is saved.`), link);
+  }
+
   function render(d) {
     const p = d.profile, today = d.today.items;
     const taken = today.filter((i) => i.status === "taken").length;
     const missed = today.filter((i) => i.status === "missed").length;
-    const urgent = d.alerts.filter((a) => !a.acknowledged && a.level === "urgent").length;
+    const openAlerts = d.alerts.filter((a) => !a.acknowledged);
+    const urgent = openAlerts.filter((a) => a.level === "urgent").length;
     observers.forEach((o) => o.disconnect());
     observers = [];
+    loadedAt = Date.now();
     document.getElementById("who").textContent = `${p.patient_name} · cared for by ${p.caregiver_name}`;
 
-    const alerts = d.alerts.length
-      ? h("ul", { class: "rows scroll" }, d.alerts.map((a) => h("li", { class: a.acknowledged ? "done" : "" },
+    // ---- alerts, open first, urgent on top
+    const order = { urgent: 0, warning: 1, info: 2 };
+    const shown = (alertView === "open" ? openAlerts : d.alerts)
+      .slice().sort((a, b) => (a.acknowledged - b.acknowledged) || (order[a.level] - order[b.level]) || b.created_at.localeCompare(a.created_at));
+    const tabs = h("div", { class: "tabs", role: "group", "aria-label": "Which alerts" },
+      ...[["open", `Open (${openAlerts.length})`], ["all", "All"]].map(([v, label]) =>
+        h("button", { type: "button", "aria-pressed": String(alertView === v), onclick: () => { alertView = v; render(d); } }, label)));
+    const alerts = shown.length
+      ? h("ul", { class: "rows scroll" }, shown.map((a) => h("li", { class: [a.acknowledged ? "done" : "", a.level === "urgent" && !a.acknowledged ? "urgent" : ""].join(" ") },
           h("div", { class: "main" },
-            h("div", { class: "title" }, a.title),
+            h("div", { class: "title" }, a.title, h("span", { class: "kind" }, KIND[a.kind] || a.kind)),
             a.detail ? h("div", { class: "detail" }, a.detail) : null,
-            h("div", { class: "meta" }, status(a.level), ` · ${ago(a.created_at)}`, a.notified ? " · sent to caregiver" : "", a.escalated_at ? " · sent to backup contact" : "", a.acknowledged ? " · acknowledged" : "")),
+            h("div", { class: "meta" }, status(a.level), ` · ${ago(a.created_at)}`, a.notified ? ` · sent to ${p.caregiver_name}` : "",
+              a.escalated_at ? " · sent to the backup contact" : "", a.acknowledged ? " · acknowledged" : "")),
           a.acknowledged ? null : h("button", { class: "btn", type: "button", onclick: () => ack(a.id) }, "Acknowledge"))))
-      : h("p", { class: "empty" }, "No alerts. All quiet.");
+      : h("p", { class: "empty" }, alertView === "open" ? "Nothing needs your attention. All quiet." : "No alerts yet.");
+    const ackable = openAlerts.filter((a) => a.level !== "urgent").map((a) => a.id);
+    const alertsCard = h("section", { class: "card span-7" },
+      h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h2", {}, "Alerts"),
+        h("p", { class: "sub" }, `Urgent ones first. Warnings and urgent alerts also go to ${p.caregiver_name}'s phone and email.`)),
+        ackable.length > 1 ? h("button", { class: "btn small", type: "button", onclick: () => ackAll(ackable) }, "Acknowledge all non-urgent") : null),
+      tabs, alerts);
 
+    // ---- today
+    const next = today.find((i) => i.status === "due" || i.status === "upcoming");
+    const pctToday = today.length ? Math.round((100 * taken) / today.length) : 0;
     const doses = h("ul", { class: "rows" }, today.map((i) => h("li", {},
       h("span", { class: "time" }, clock(i.time)),
       h("div", { class: "main" }, h("div", { class: "title" }, `${i.medication} ${i.dose}`),
         h("div", { class: "meta" }, i.taken_at ? `Logged ${new Date(i.taken_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}` : i.purpose)),
       status(i.status))));
+    const todayCard = card("span-5", "Today's doses", day(d.today.date, { weekday: "long", month: "long", day: "numeric" }),
+      h("div", { class: "progress", role: "img", "aria-label": `${taken} of ${today.length} doses taken` }, h("span", { style: `width:${pctToday}%` })),
+      next ? h("div", { class: "next" }, h("strong", {}, i18nNext(next)), next.purpose ? ` · ${next.purpose}` : "") : null,
+      doses);
+
+    // ---- reminders and alarms
+    const when = (iso) => new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const reminders = d.reminders.length
+      ? h("ul", { class: "rows" }, d.reminders.map((r) => h("li", {},
+          h("div", { class: "main" },
+            h("div", { class: "title" }, r.text.charAt(0).toUpperCase() + r.text.slice(1)),
+            h("div", { class: "meta" }, r.important ? status("alarm") : null, r.important ? " · " : "", when(r.at),
+              r.important ? ` · heads-up 30 min before; ${p.caregiver_name} is told at the time` : "")),
+          h("button", { class: "btn", type: "button", onclick: () => cancelReminder(r.id) }, "Cancel"))))
+      : h("p", { class: "empty" }, `None set. ${p.preferred_name} can say “remind me to call ${p.caregiver_name} at 5” or “set an alarm for my doctor's appointment”.`);
+
+    // ---- weekly report
+    const report = d.latest_report
+      ? [h("p", { class: "report" }, d.latest_report.detail), h("div", { class: "meta" }, `Sent ${ago(d.latest_report.created_at)}`)]
+      : [h("p", { class: "empty" }, `Every Sunday evening ${p.caregiver_name} gets a short written report: doses, missed ones, moods and any suspicious calls.`)];
+    const sendReport = h("button", { class: "btn small", type: "button", onclick: async (e) => {
+      e.target.disabled = true; e.target.textContent = "Writing…";
+      const r = await fetch("/api/reports/weekly", { method: "POST", headers });
+      const data = await r.json().catch(() => ({}));
+      toast(r.ok ? (data.sent ? "Weekly report emailed" : "Report written (not emailed: no email set up)") : "Couldn't write the report");
+      load();
+    } }, "Send now");
+    const reportCard = h("section", { class: "card span-7" },
+      h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h2", {}, "Weekly report"), h("p", { class: "sub" }, "Written by Claude from the week's data")), sendReport),
+      ...report);
 
     const meds = h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Medication"), h("th", {}, "Times"), h("th", { class: "num" }, "Pills left"))),
       h("tbody", {}, d.medications.map((m) => h("tr", {},
@@ -325,24 +491,16 @@
           h("div", { class: "detail" }, r.status_message), h("div", { class: "meta" }, ago(r.updated_at))))))
       : h("p", { class: "empty" }, "No refill requests yet.");
 
-    const when = (iso) => new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-    const reminders = d.reminders.length
-      ? h("ul", { class: "rows" }, d.reminders.map((r) => h("li", {},
-          h("div", { class: "main" },
-            h("div", { class: "title" }, r.text),
-            h("div", { class: "meta" }, r.important ? status("alarm") : null, r.important ? " · " : "", when(r.at),
-              r.important ? " · heads-up 30 min before, you're told at the time" : "")),
-          h("button", { class: "btn", type: "button", onclick: () => cancelReminder(r.id) }, "Cancel"))))
-      : h("p", { class: "empty" }, `No reminders. ${p.preferred_name} can say “remind me to call ${p.caregiver_name} at 5” or “set an alarm for my doctor's appointment”.`);
-
     const pct = d.adherence.pct === null ? "—" : `${Math.round(d.adherence.pct)}%`;
-    document.getElementById("main").replaceChildren(
+    document.getElementById("main").replaceChildren(...[
+      banner(d, today, openAlerts),
+      setupNotice(d),
       tile("7-day adherence", pct, `${d.adherence.taken} of ${d.adherence.scheduled} doses taken`, "hero"),
       tile("Doses today", `${taken} of ${today.length}`, missed ? `${missed} missed` : "None missed"),
-      tile("Open alerts", String(d.open_alerts), urgent ? `${urgent} urgent` : "None urgent"),
+      tile("Open alerts", String(openAlerts.length), urgent ? `${urgent} urgent` : "None urgent"),
       tile("Last active", ago(p.last_activity), p.last_activity ? new Date(p.last_activity).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : ""),
-      card("span-7", "Alerts", "Newest first. Warnings and urgent alerts go to the caregiver's phone and email (see Settings).", alerts),
-      card("span-5", "Today's doses", day(d.today.date, { weekday: "long", month: "long", day: "numeric" }), doses),
+      alertsCard,
+      todayCard,
       card("span-7", "Doses taken, last 7 days", "Share of scheduled doses logged each day. Today counts only doses already due.",
         adherenceChart(d.adherence.by_day),
         tableView("adherence", [["Day"], ["Taken", 1], ["Scheduled", 1], ["Share", 1]],
@@ -352,11 +510,24 @@
         moodChart(d.checkins),
         tableView("mood", [["When"], ["Mood"], ["Notes"]],
           d.checkins.map((c) => [day(c.at, { weekday: "short", month: "short", day: "numeric" }), c.mood, c.notes || "—"]))),
-      card("span-7", "Medications", null, meds),
+      reportCard,
+      card("span-5", "Reminders and alarms", "Set by voice. Alarms ring on the Echo.", reminders),
+      card("span-7", "Medications", h("a", { href: document.getElementById("settings").href }, "Edit in Settings"), meds),
       card("span-5", "Pharmacy refills", p.pharmacy_name, refills),
-      card("span-12", "Reminders and alarms", "Set by voice. Alarms ring on the Echo and alert you when they're due.", reminders),
-    );
+    ].filter(Boolean));
+    tickUpdated();
   }
+
+  function i18nNext(next) {
+    return next.status === "due" ? `Due now: ${next.medication} ${next.dose}` : `Next: ${next.medication} ${next.dose} at ${clock(next.time)}`;
+  }
+
+  function tickUpdated() {
+    if (!loadedAt) return;
+    const s = Math.round((Date.now() - loadedAt) / 1000);
+    document.getElementById("updated").textContent = s < 10 ? "Updated just now" : `Updated ${s < 60 ? `${s}s` : `${Math.round(s / 60)} min`} ago`;
+  }
+  setInterval(tickUpdated, 5000);
 
   let loading = false;
   async function load() {

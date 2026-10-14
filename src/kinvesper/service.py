@@ -760,6 +760,9 @@ class CareService:
             ],
             "refills": [r.model_dump() for r in self.refills()[:5]],
             "reminders": [r.model_dump() for r in self.reminders()[:10]],
+            "latest_report": next((a.model_dump() for a in self.alerts() if a.kind == "report"), None),
+            "alerts_reach": {"phone": bool(p.caregiver_phone), "email": bool(p.caregiver_email),
+                             "backup": bool(p.backup_phone or p.backup_email)},
         }
 
     # ---------- summaries ----------

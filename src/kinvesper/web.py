@@ -77,6 +77,7 @@ def voice_routes(sessions: VoiceSessions) -> list[Route]:
             "mode": session.mode,
             "provider": settings.llm_provider if llm.enabled() else "none",
             "caregiver": session.caregiver,
+            "patient": session.patient,
             "medications": [m["name"] for m in session.meds],
             "tools": [t["name"] for t in session.tools],
             "server_voice": speech.tts_available(),
