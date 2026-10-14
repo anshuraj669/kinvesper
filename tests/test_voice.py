@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 import httpx
@@ -168,8 +169,9 @@ async def test_claude_answers_anything_with_web_search(connect, monkeypatch):
         assert out.reply == "It's sunny in Kathmandu, around 24 degrees."
         assert out.tool_calls == [] and len(calls) == 2
         # The search results are dropped from the history: later turns only carry what was said.
-        assert session.history == [{"role": "user", "content": "What's the weather in Kathmandu today?"},
-                                    {"role": "assistant", "content": out.reply}]
+        question, answer = session.history
+        assert question["content"].endswith("What's the weather in Kathmandu today?")
+        assert answer == {"role": "assistant", "content": out.reply}
     finally:
         await session.close()
 
@@ -181,6 +183,32 @@ def test_web_search_only_with_the_claude_api(monkeypatch):
     for provider, searches in [("anthropic", True), ("bedrock", False), ("ollama", False), ("none", False)]:
         monkeypatch.setattr(llm, "settings", Settings(llm_provider=provider))
         assert bool(llm.server_tools()) is searches
+
+
+async def test_claude_knows_the_local_time(connect, monkeypatch):
+    seen = []
+
+    async def fake_create(**params):
+        seen.append(params["messages"][-1]["content"])
+        return _reply("end_turn", _block(type="text", text="It's 3:22 PM."))
+
+    monkeypatch.setattr(voice, "now", lambda: datetime(2026, 10, 14, 15, 22))
+    monkeypatch.setattr(voice.llm, "enabled", lambda: True)
+    monkeypatch.setattr(voice.llm, "create_message", fake_create)
+    session = VoiceSession(connect=connect)
+    await session.start()
+    try:
+        await session.turn("What is the time right now?")
+        assert seen[0].startswith("[Now] 3:22 PM on Wednesday, October 14, 2026\n")
+        assert "[Now] line is the current local date and time" in session.system
+    finally:
+        await session.close()
+
+
+async def test_offline_router_tells_the_time(offline, monkeypatch):
+    monkeypatch.setattr(voice, "now", lambda: datetime(2026, 10, 14, 20, 5))
+    out = await offline.turn("Hey, what is the time right now?")
+    assert out.reply == "It's 8:05 PM on Wednesday, October 14, 2026." and not out.tool_calls
 
 
 async def test_claude_refusal_keeps_history_clean(connect, monkeypatch):

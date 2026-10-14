@@ -38,7 +38,7 @@ from pydantic import BaseModel
 
 from . import contacts, llm, speech
 from .i18n import LANGUAGES
-from .config import settings
+from .config import now, settings
 from .scam import rule_assess
 
 log = logging.getLogger(__name__)
@@ -70,6 +70,8 @@ Everything you write is spoken aloud by a speaker:
   you have it; otherwise say what you know and that it may be out of date.
 - Health worries still go through the tools: symptoms to daily_check_in, emergencies to emergency_help.
 - Lines starting with [Update] are background events (like a finished refill). Mention them briefly.
+- The [Now] line is the current local date and time where {name} lives. Use it for "what time is
+  it", "is it time for my pills" and anything relative to now; don't mention it otherwise.
 """
 
 # Opens an initialized MCP client session; yields it with the server's instructions.
@@ -95,6 +97,12 @@ class Announcement(BaseModel):
     tool_calls: list[ToolCall] = []
 
 
+def spoken_clock() -> str:
+    """'3:22 PM on Wednesday, October 14, 2026' in the care timezone (the server's clock, not the model's)."""
+    t = now()
+    return f"{t.strftime('%-I:%M %p')} on {t.strftime('%A, %B %-d, %Y')}"
+
+
 def _blocks(message: dict) -> list:
     return message["content"] if isinstance(message["content"], list) else []
 
@@ -118,6 +126,7 @@ def spoken_text(data: dict | None) -> str:
 EMERGENCY = re.compile(r"\b(i fell|fallen|fell down|chest pain|can'?t breathe|emergency|help me|hurt myself|bleeding)\b")
 NOTIFY = re.compile(r"\b(?:tell|message|text|let)\s+(\w+)(?:\s+know)?(?:\s+that)?\s*(.*)", re.S)
 REFILL = re.compile(r"\b(refill|more of my|run(?:ning)? out|order (?:more|my)|new prescription)\b")
+CLOCK = re.compile(r"\b(what(?:'?s| is) the time|what time is it|time (?:is it )?(?:right )?now|what(?:'?s| is) (?:the )?(?:date|day) today|what day is (?:it|today))\b")
 TOOK = re.compile(r"\b(i (?:just )?took|i'?ve (?:just )?taken|i have taken|just had my)\b")
 SCHEDULE = re.compile(r"\b(pills?|medicines?|medications?|meds|tablets?|dose|what'?s next)\b")
 SUMMARY = re.compile(r"\b(summary|report|how was (?:mom|dad|her|his|my|the)(?:'s)? week|this week)\b")
@@ -338,6 +347,8 @@ class VoiceSession:
         return await self._respond_offline(text)
 
     async def _respond_offline(self, text: str) -> str:
+        if CLOCK.search(text.lower()) and self.language == "en":
+            return f"It's {spoken_clock()}."
         if self.language == "hi":  # the keyword router only knows English
             return "माफ़ कीजिए, अभी मैं हिंदी नहीं समझ पा रहा। कृपया अंग्रेज़ी में बोलिए।"
         choice = route(text, self.meds, self.caregiver)
@@ -349,7 +360,8 @@ class VoiceSession:
 
     async def _respond_claude(self, text: str) -> str:
         notes, self.notes = self.notes, []
-        self.history.append({"role": "user", "content": "\n".join([*(f"[Update] {n}" for n in notes), text])})
+        self.history.append({"role": "user", "content": "\n".join(
+            [f"[Now] {spoken_clock()}", *(f"[Update] {n}" for n in notes), text])})
         system = [{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}]
         if self.language != "en":  # after the cache breakpoint, so both languages share the cached prefix
             system.append({"type": "text", "text": (
