@@ -234,6 +234,7 @@ class CareService:
             "email_status": await notify.email_status(p.caregiver_email),
             "backup_email_status": await notify.email_status(p.backup_email),
             "escalate_after_min": settings.escalate_after_min,
+            "low_stock_threshold": settings.low_stock_threshold,
             "sms": bool(p.caregiver_phone),
         }
 

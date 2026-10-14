@@ -8,71 +8,158 @@
   :root {
     color-scheme: light;
     --bg: #f4f6f5; --panel: #ffffff; --ink: #14201d; --ink-2: #4a5754; --muted: #6f7c78; --line: #dfe5e3;
-    --brand: #0f766e; --brand-soft: #d9f0ec; --wash: #f1f4f3;
-    --good: #0ca30c; --warning: #fab219; --critical: #d03b3b;
+    --brand: #0f766e; --brand-ink: #ffffff; --brand-soft: #d9f0ec; --wash: #f1f4f3;
+    --good: #0ca30c; --warning: #fab219; --warning-ink: #8a5a00; --critical: #d03b3b; --critical-soft: #fdeceb;
     --shadow: 0 1px 2px rgba(16,24,22,.06), 0 8px 24px rgba(16,24,22,.05);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
       --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --ink-2: #c3cfcb; --muted: #93a39f; --line: #25332f;
-      --brand: #2dd4bf; --brand-soft: #123a35; --wash: #1c2a27; --critical: #f07070;
-      --shadow: none;
+      --brand: #2dd4bf; --brand-ink: #04201c; --brand-soft: #123a35; --wash: #1c2a27; --warning-ink: #fbbf24;
+      --critical: #f07070; --critical-soft: #3a1717; --shadow: none;
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
     --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --ink-2: #c3cfcb; --muted: #93a39f; --line: #25332f;
-    --brand: #2dd4bf; --brand-soft: #123a35; --wash: #1c2a27; --critical: #f07070;
-    --shadow: none;
+    --brand: #2dd4bf; --brand-ink: #04201c; --brand-soft: #123a35; --wash: #1c2a27; --warning-ink: #fbbf24;
+    --critical: #f07070; --critical-soft: #3a1717; --shadow: none;
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
   header {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px;
+    position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 12px 20px;
     background: var(--panel); border-bottom: 1px solid var(--line);
   }
   header h1 { font-size: 17px; margin: 0; font-weight: 650; }
   header h1 span { color: var(--muted); font-weight: 450; }
   .spacer { flex: 1; }
   .btn {
-    font: inherit; font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 10px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; padding: 8px 14px;
+    border-radius: 10px; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    text-decoration: none; white-space: nowrap;
   }
-  .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--panel); }
-  .btn.quiet { border-color: transparent; color: var(--ink-2); padding: 6px 10px; }
-  .btn:disabled { opacity: .6; cursor: default; }
-  .btn:focus-visible, input:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-  main { max-width: 860px; margin: 0 auto; padding: 20px 20px 100px; display: grid; gap: 16px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px; }
-  .card h2 { font-size: 15px; margin: 0 0 2px; font-weight: 650; }
-  .card .sub { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
-  .grid { display: grid; gap: 12px 16px; grid-template-columns: repeat(2, 1fr); }
+  .btn svg { width: 16px; height: 16px; flex: none; }
+  .btn:hover:not(:disabled) { border-color: var(--brand); }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
+  .btn.quiet { border-color: transparent; background: none; color: var(--ink-2); padding: 6px 10px; }
+  .btn.quiet:hover:not(:disabled) { background: var(--wash); border-color: transparent; }
+  .btn.danger:hover:not(:disabled) { color: var(--critical); }
+  .btn.small { font-size: 13px; padding: 5px 10px; }
+  .btn:disabled { opacity: .55; cursor: default; }
+
+  /* ---- layout: section nav + cards ---- */
+  .layout { max-width: 1100px; margin: 0 auto; padding: 20px 20px 110px; display: grid; grid-template-columns: 220px 1fr; gap: 24px; align-items: start; }
+  nav.sections { position: sticky; top: 76px; display: grid; gap: 2px; }
+  nav.sections a {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; color: var(--ink-2);
+    text-decoration: none; font-size: 14px; font-weight: 600;
+  }
+  nav.sections a:hover { background: var(--wash); }
+  nav.sections a[aria-current="true"] { background: var(--brand-soft); color: var(--brand); }
+  nav.sections .state { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--line); }
+  .dot.good { background: var(--good); } .dot.warn { background: var(--warning); } .dot.bad { background: var(--critical); }
+  main { display: grid; gap: 16px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 20px 22px; }
+  .card-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+  .card-head .grow { flex: 1; min-width: 0; }
+  .card h2 { font-size: 16px; margin: 0 0 2px; font-weight: 650; }
+  .card .sub { font-size: 13.5px; color: var(--muted); margin: 0; }
+  .optional { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--wash); padding: 1px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; }
+  .progress-card { display: flex; align-items: center; gap: 16px; }
+  .progress-card .bar-track { flex: 1; height: 8px; background: var(--wash); border-radius: 999px; overflow: hidden; }
+  .progress-card .bar-track span { display: block; height: 100%; background: var(--good); border-radius: 999px; transition: width .3s; }
+  .todo { margin: 12px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; }
+  .todo li { display: flex; gap: 8px; align-items: center; }
+  .todo a { color: var(--brand); font-weight: 600; text-decoration: none; }
+  .todo a:hover { text-decoration: underline; }
+
+  /* ---- fields ---- */
+  .grid { display: grid; gap: 14px 16px; grid-template-columns: repeat(2, 1fr); }
   .grid .wide { grid-column: 1 / -1; }
   .grid.three { grid-template-columns: 2fr 1.4fr 1.6fr; }
-  label { display: grid; gap: 4px; align-content: start; font-size: 13px; font-weight: 600; color: var(--ink-2); }
-  label .hint { font-weight: 400; font-size: 12px; color: var(--muted); }
+  .field { display: grid; gap: 5px; align-content: start; }
+  .field > label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .field .req { color: var(--critical); margin-left: 2px; }
+  .hint { font-size: 12.5px; color: var(--muted); }
+  .error-text { font-size: 12.5px; color: var(--critical); font-weight: 600; }
   input {
-    font: inherit; font-size: 15px; font-weight: 400; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line);
+    font: inherit; font-size: 15px; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--line);
     background: var(--bg); color: var(--ink); width: 100%; min-width: 0;
   }
-  .med { border-top: 1px solid var(--line); padding: 14px 0; }
-  .med:first-of-type { border-top: none; padding-top: 0; }
-  .med-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-  .med-head strong { flex: 1; }
-  .note { font-size: 13px; color: var(--ink-2); margin-top: 6px; display: flex; gap: 6px; align-items: flex-start; }
+  input:hover { border-color: color-mix(in srgb, var(--brand) 35%, var(--line)); }
+  input[aria-invalid="true"] { border-color: var(--critical); background: var(--critical-soft); }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .preset { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); cursor: pointer; }
+  .preset[aria-pressed="true"] { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); font-weight: 600; }
+  .note { font-size: 13px; color: var(--ink-2); margin-top: 12px; display: flex; gap: 8px; align-items: flex-start; padding: 9px 12px; border-radius: 10px; background: var(--wash); }
   .note svg { width: 14px; height: 14px; flex: none; margin-top: 3px; }
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
-  .bar {
-    position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line);
-    padding: 12px 20px; display: flex; gap: 12px; align-items: center; justify-content: flex-end;
+  .actions-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .inline-msg { font-size: 13.5px; color: var(--ink-2); }
+  .inline-msg.error { color: var(--critical); }
+
+  /* ---- medicines and contacts as rows that open ---- */
+  .items { display: grid; gap: 10px; }
+  .item { border: 1px solid var(--line); border-radius: 12px; }
+  .item.has-error { border-color: var(--critical); }
+  .item-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+  .item-head .who { flex: 1; min-width: 0; }
+  .item-head .name { font-weight: 650; }
+  .item-head .name .dose { font-weight: 450; color: var(--ink-2); }
+  .item-head .details { font-size: 13px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+  .time-chip { font-size: 12.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); }
+  .low { color: var(--warning-ink); font-weight: 650; }
+  .chev { width: 18px; height: 18px; color: var(--muted); transition: transform .2s; flex: none; }
+  .item.open .chev { transform: rotate(180deg); }
+  .item-body { padding: 4px 14px 16px; border-top: 1px solid var(--line); display: none; }
+  .item.open .item-body { display: block; padding-top: 14px; }
+  .item-foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+  .times { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .time { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); padding-right: 2px; }
+  .time input { border: none; background: none; width: 120px; padding: 7px 8px; }
+  .time button { border: none; background: none; color: var(--muted); cursor: pointer; padding: 4px 6px; border-radius: 6px; font-size: 16px; line-height: 1; }
+  .time button:hover { color: var(--critical); background: var(--wash); }
+  .empty { color: var(--muted); font-size: 14px; margin: 0; padding: 14px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
+
+  /* ---- save bar: only when something changed ---- */
+  .savebar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--panel); border-top: 1px solid var(--line);
+    padding: 12px 20px; display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+    transform: translateY(110%); transition: transform .2s; box-shadow: 0 -6px 20px rgba(16,24,22,.08);
   }
-  .bar .msg { flex: 1; font-size: 14px; color: var(--ink-2); }
-  .bar .msg.error { color: var(--critical); }
-  .empty { color: var(--muted); font-size: 14px; }
-  @media (max-width: 640px) {
-    main { padding: 16px 16px 120px; }
+  .savebar.show { transform: none; }
+  .savebar .msg { flex: 1; font-size: 14px; color: var(--ink-2); }
+  .savebar .msg.error { color: var(--critical); font-weight: 600; }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--panel); z-index: 7;
+    padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .toast.show { opacity: 1; pointer-events: auto; }
+  .toast button { background: none; border: none; color: var(--brand-soft); font-weight: 700; cursor: pointer; padding: 0; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+  @media (max-width: 900px) {
+    header { padding: 10px 16px; }
+    header .label { display: none; }
+    .layout { grid-template-columns: 1fr; padding: 0 16px 120px; gap: 12px; }
+    nav.sections {
+      position: sticky; top: 57px; z-index: 4; display: flex; overflow-x: auto; gap: 6px; margin: 0 -16px; padding: 10px 16px;
+      background: var(--bg); border-bottom: 1px solid var(--line); scrollbar-width: none;
+    }
+    nav.sections a { flex: none; padding: 6px 12px; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; font-size: 13px; }
+    nav.sections .state { display: none; }
+    html { scroll-padding-top: 120px; }
+    .card { padding: 16px; }
     .grid, .grid.three { grid-template-columns: 1fr; }
+    .savebar { padding: 10px 16px; }
+    .savebar .msg { font-size: 13px; }
   }
 </style>
 </head>
@@ -80,18 +167,27 @@
 <header>
   <h1>Kinvesper <span>· settings</span></h1>
   <div class="spacer"></div>
-  <a class="btn" id="back" href="/dashboard">Back to dashboard</a>
+  <a class="btn" id="back" href="/dashboard" title="Back to the dashboard">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+    <span class="label">Dashboard</span>
+  </a>
 </header>
-<main id="main"><p class="empty">Loading…</p></main>
-<div class="bar">
-  <span class="msg" id="msg" role="status" aria-live="polite"></span>
-  <button class="btn primary" id="save" type="button" disabled>Save</button>
+<div class="layout">
+  <nav class="sections" id="nav" aria-label="Settings sections"></nav>
+  <main id="main"><p class="empty">Loading…</p></main>
 </div>
+<div class="savebar" id="savebar" role="region" aria-label="Unsaved changes">
+  <span class="msg" id="msg" role="status" aria-live="polite"></span>
+  <button class="btn quiet" id="discard" type="button">Discard</button>
+  <button class="btn primary" id="save" type="button">Save changes</button>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
 (() => {
   const key = new URLSearchParams(location.search).get("key") || "";
   const headers = key ? { "X-Dashboard-Key": key, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
   if (key) document.getElementById("back").href = `/dashboard?key=${encodeURIComponent(key)}`;
+  const $ = (id) => document.getElementById(id);
   const ICONS = {
     good: '<circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
     warning: '<path d="M7 1l6.3 11H.7z" fill="var(--warning)"/><path d="M7 5v3.2M7 10.2h.01" stroke="#1a1a19" stroke-width="1.6" stroke-linecap="round"/>',
@@ -104,13 +200,19 @@
     no_topic: ["muted", "Running locally: alerts are logged, not emailed."],
     unknown: ["muted", "Couldn't check the email status right now."],
   };
-  const save = document.getElementById("save"), msg = document.getElementById("msg");
-  let state = null;
+  const CHEVRON = '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  const EMERGENCY = [["112", "India, EU"], ["911", "US, Canada"], ["999", "UK"], ["000", "Australia"]];
+  const CONTACT_PRESETS = [["Bank", "bank"], ["Doctor", "doctor"], ["Pharmacy", "pharmacy"], ["Grandchild", "grandson"], ["Neighbour", "neighbour"]];
+
+  let state = null, saved = "", errors = {}, open = new Set(), current = "person";
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const snapshot = () => JSON.stringify({ p: state.profile, m: state.medications, c: state.contacts });
 
   function h(tag, attrs = {}, ...kids) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
       if (k === "class") el.className = v;
+      else if (k === "html") el.innerHTML = v;
       else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
       else if (v !== undefined && v !== null && v !== false) el.setAttribute(k, v);
     }
@@ -118,91 +220,244 @@
     return el;
   }
   function note(tone, text) {
-    const n = h("div", { class: "note" });
-    n.innerHTML = `<svg viewBox="0 0 14 14" aria-hidden="true">${ICONS[tone]}</svg>`;
-    n.append(text);
-    return n;
+    return h("div", { class: "note" }, h("span", { html: `<svg viewBox="0 0 14 14" aria-hidden="true">${ICONS[tone]}</svg>` }), text);
   }
-  const say = (text, error = false) => { msg.textContent = text; msg.className = error ? "msg error" : "msg"; };
-  const dirty = () => { save.disabled = false; say("Unsaved changes"); };
+  function toast(text, action) {
+    const t = $("toast");
+    t.replaceChildren(h("span", {}, text));
+    if (action) t.append(h("button", { type: "button", onclick: () => { action[1](); t.classList.remove("show"); } }, action[0]));
+    t.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => t.classList.remove("show"), action ? 6000 : 2600);
+  }
+  const say = (text, error = false) => { $("msg").textContent = text; $("msg").className = error ? "msg error" : "msg"; };
 
-  // A text field bound to obj[prop].
+  // ---- changes, saving, discarding ----
+  function changed() {
+    const dirty = state && snapshot() !== saved;
+    $("savebar").classList.toggle("show", dirty);
+    if (dirty && !$("msg").classList.contains("error")) say("You have unsaved changes");
+    renderNav();
+    return dirty;
+  }
+
+  // ---- checks, the same rules the server applies, shown next to each field ----
+  const clean = (phone) => (phone || "").replace(/[\s\-().]/g, "");
+  const PHONE = /^\+[1-9]\d{7,14}$/, EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/, TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+  function validate() {
+    const e = {}, p = state.profile;
+    for (const [k, label] of [["patient_name", "Full name"], ["preferred_name", "What to call them"], ["caregiver_name", "The caregiver's name"]])
+      if (!(p[k] || "").trim()) e[`p.${k}`] = `${label} is needed.`;
+    if (!/^\d{2,6}$/.test(p.emergency_number || "")) e["p.emergency_number"] = "Use the short local number, like 112 or 911.";
+    for (const who of ["caregiver", "backup"]) {
+      if (p[`${who}_phone`] && !PHONE.test(clean(p[`${who}_phone`]))) e[`p.${who}_phone`] = "Start with + and the country code, like +91 98765 43210.";
+      if (p[`${who}_email`] && !EMAIL_RE.test(p[`${who}_email`].trim())) e[`p.${who}_email`] = "That email address doesn't look right.";
+    }
+    if (!clean(p.caregiver_phone) && !(p.caregiver_email || "").trim()) e["p.caregiver_email"] = "Add a phone or an email, so alerts reach someone.";
+    if ((p.backup_phone || p.backup_email) && !(p.backup_name || "").trim()) e["p.backup_name"] = "Add the backup contact's name.";
+    if (!state.medications.length) e.meds = "Add at least one medicine.";
+    state.medications.forEach((m, i) => {
+      if (!(m.name || "").trim()) e[`m.${i}.name`] = "Add the medicine's name.";
+      if (!(m.dose || "").trim()) e[`m.${i}.dose`] = "Add the dose, like 10 mg.";
+      if (!m.times.length || !m.times.every((t) => TIME.test(t))) e[`m.${i}.times`] = "Add at least one time.";
+      if (!/^\d+$/.test(String(m.pills_remaining ?? ""))) e[`m.${i}.pills_remaining`] = "A whole number.";
+    });
+    state.contacts.forEach((c, i) => {
+      if (!(c.name || "").trim()) e[`c.${i}.name`] = "Add a name.";
+      if (!/^\+?\d{7,15}$/.test(clean(c.phone))) e[`c.${i}.phone`] = "Digits, with the country code if it has one.";
+    });
+    return e;
+  }
+
+  // ---- building blocks ----
+  let uid = 0;
   function field(label, obj, prop, opts = {}) {
-    const input = h("input", { type: opts.type || "text", value: obj[prop] ?? "", placeholder: opts.placeholder || "",
-      autocomplete: opts.autocomplete || "off", inputmode: opts.inputmode, required: opts.required,
-      oninput: (e) => { obj[prop] = opts.type === "number" ? e.target.value : e.target.value; dirty(); } });
-    return h("label", { class: opts.wide ? "wide" : "" }, label, input, opts.hint ? h("span", { class: "hint" }, opts.hint) : null);
+    const id = `f${++uid}`, errKey = opts.err, err = errKey && errors[errKey];
+    const input = h("input", {
+      id, type: opts.type || "text", value: obj[prop] ?? "", placeholder: opts.placeholder || "",
+      autocomplete: opts.autocomplete || "off", inputmode: opts.inputmode, "aria-invalid": err ? "true" : null,
+      "aria-describedby": err || opts.hint ? `${id}-d` : null, "data-err": errKey || null,
+      oninput: (e) => { obj[prop] = opts.type === "number" ? e.target.value.replace(/\D/g, "") : e.target.value; if (opts.onchange) opts.onchange(); changed(); },
+      onblur: (e) => {  // a fixed field loses its error at once, without redrawing (keeps the focus where it went)
+        if (!errKey || !errors[errKey] || validate()[errKey]) return;
+        delete errors[errKey];
+        e.target.removeAttribute("aria-invalid");
+        e.target.parentElement.querySelector(".error-text")?.remove();
+        if (!Object.keys(errors).length) say("You have unsaved changes");
+      },
+    });
+    return h("div", { class: `field${opts.wide ? " wide" : ""}` },
+      h("label", { for: id }, label, opts.required ? h("span", { class: "req", "aria-hidden": "true" }, "*") : null),
+      input, opts.extra || null,
+      err ? h("span", { class: "error-text", id: `${id}-d` }, err) : opts.hint ? h("span", { class: "hint", id: `${id}-d` }, opts.hint) : null);
   }
 
-  function medCard(m, i) {
-    const times = { value: (m.times || []).join(", ") };
-    const timesField = field("Times", times, "value", { placeholder: "08:00, 20:00", hint: "24-hour, separated by commas" });
-    timesField.querySelector("input").addEventListener("input", () => { m.times = times.value.split(/[,\s]+/).filter(Boolean); });
-    return h("div", { class: "med" },
-      h("div", { class: "med-head" }, h("strong", {}, m.name || `Medicine ${i + 1}`),
-        h("button", { class: "btn quiet", type: "button", onclick: () => { state.medications.splice(i, 1); dirty(); render(); } }, "Remove")),
-      h("div", { class: "grid" },
-        field("Name", m, "name", { required: true }),
-        field("Dose", m, "dose", { placeholder: "10 mg", required: true }),
-        timesField,
-        field("Pills left", m, "pills_remaining", { type: "number", inputmode: "numeric" }),
-        field("What it's for", m, "purpose", { placeholder: "blood pressure", hint: "helps match “my blood pressure pill”", wide: true }),
-        field("Instructions", m, "instructions", { placeholder: "take with food", wide: true })));
+  function section(id, title, sub, body, { optional, action } = {}) {
+    return h("section", { class: "card", id, "aria-labelledby": `${id}-t` },
+      h("div", { class: "card-head" },
+        h("div", { class: "grow" }, h("h2", { id: `${id}-t` }, title, optional ? h("span", { class: "optional" }, "Optional") : null), h("p", { class: "sub" }, sub)),
+        action || null),
+      ...body);
   }
 
-  function contactRow(c, i) {
-    return h("div", { class: "med" },
-      h("div", { class: "med-head" }, h("strong", {}, c.name || `Contact ${i + 1}`),
-        h("button", { class: "btn quiet", type: "button", onclick: () => { state.contacts.splice(i, 1); dirty(); render(); } }, "Remove")),
-      h("div", { class: "grid three" },
-        field("Name", c, "name", { placeholder: "State Bank of India" }),
-        field("Who they are", c, "relation", { placeholder: "bank, doctor, grandson" }),
-        field("Phone", c, "phone", { type: "tel", placeholder: "+91 98412 37777" })));
+  const clock12 = (t) => new Date(`2000-01-01T${t}:00`).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+  function timesEditor(m, i) {
+    const err = errors[`m.${i}.times`];
+    const row = h("div", { class: "times", "data-err": `m.${i}.times` },
+      ...m.times.map((t, j) => h("span", { class: "time" },
+        h("input", { type: "time", value: t, "aria-label": `Dose time ${j + 1}`, oninput: (e) => { m.times[j] = e.target.value; changed(); } }),
+        h("button", { type: "button", "aria-label": `Remove ${t}`, onclick: () => { m.times.splice(j, 1); changed(); render(); } }, "×"))),
+      h("button", { class: "btn small", type: "button", onclick: () => { m.times.push(["08:00", "13:00", "20:00", "22:00", "06:00"].find((t) => !m.times.includes(t)) || "12:00"); changed(); render(); } }, "+ Add a time"));
+    return h("div", { class: "field wide" }, h("label", {}, "Times each day", h("span", { class: "req", "aria-hidden": "true" }, "*")), row,
+      err ? h("span", { class: "error-text" }, err) : h("span", { class: "hint" }, "Kinvesper and the Echo remind at these times."));
+  }
+
+  function medicine(m, i) {
+    const low = Number(m.pills_remaining) <= state.low_stock_threshold;
+    const hasErr = Object.keys(errors).some((k) => k.startsWith(`m.${i}.`));
+    const isOpen = open.has(`m${i}`) || hasErr;
+    const toggle = () => { open.has(`m${i}`) ? open.delete(`m${i}`) : open.add(`m${i}`); render(); };
+    return h("div", { class: `item${isOpen ? " open" : ""}${hasErr ? " has-error" : ""}` },
+      h("div", { class: "item-head", role: "button", tabindex: "0", "aria-expanded": String(isOpen), onclick: toggle,
+                 onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } } },
+        h("div", { class: "who" },
+          h("div", { class: "name" }, m.name || "New medicine", m.dose ? h("span", { class: "dose" }, ` ${m.dose}`) : null),
+          h("div", { class: "details" },
+            ...m.times.filter((t) => TIME.test(t)).map((t) => h("span", { class: "time-chip" }, clock12(t))),
+            h("span", { class: low ? "low" : "" }, `${m.pills_remaining || 0} pills left${low ? " · running low" : ""}`),
+            m.purpose ? h("span", {}, `For ${m.purpose}`) : null)),
+        h("span", { html: CHEVRON })),
+      h("div", { class: "item-body" },
+        h("div", { class: "grid" },
+          field("Name", m, "name", { required: true, err: `m.${i}.name`, placeholder: "Metformin" }),
+          field("Dose", m, "dose", { required: true, err: `m.${i}.dose`, placeholder: "500 mg" }),
+          timesEditor(m, i),
+          field("Pills left", m, "pills_remaining", { type: "number", inputmode: "numeric", err: `m.${i}.pills_remaining`,
+            hint: `Kinvesper offers a refill at ${state.low_stock_threshold} or fewer.` }),
+          field("What it's for", m, "purpose", { placeholder: "blood pressure", hint: "So “my blood pressure pill” finds it." }),
+          field("Instructions", m, "instructions", { placeholder: "take with food", wide: true, hint: "Said with every reminder." })),
+        h("div", { class: "item-foot" },
+          h("button", { class: "btn quiet danger", type: "button", onclick: () => remove("medications", i, m.name || "the medicine") }, "Remove medicine"))));
+  }
+
+  function contact(c, i) {
+    return h("div", { class: `item open${Object.keys(errors).some((k) => k.startsWith(`c.${i}.`)) ? " has-error" : ""}` },
+      h("div", { class: "item-body", style: "display:block;border:none;padding:14px" },
+        h("div", { class: "grid three" },
+          field("Name", c, "name", { err: `c.${i}.name`, placeholder: "State Bank of India" }),
+          field("Who they are", c, "relation", { placeholder: "bank, doctor, grandson" }),
+          field("Phone", c, "phone", { type: "tel", err: `c.${i}.phone`, placeholder: "+91 1800 123 4567" })),
+        h("div", { class: "item-foot" },
+          h("button", { class: "btn quiet danger", type: "button", onclick: () => remove("contacts", i, c.name || "the contact") }, "Remove"))));
+  }
+
+  function remove(list, i, label) {
+    const item = state[list].splice(i, 1)[0];
+    open.clear(); errors = {};
+    changed(); render();
+    toast(`Removed ${label}`, ["Undo", () => { state[list].splice(i, 0, item); changed(); render(); }]);
+  }
+
+  // ---- how complete the setup is ----
+  function status() {
+    const p = state.profile;
+    const contactSet = PHONE.test(clean(p.caregiver_phone)) || EMAIL_RE.test((p.caregiver_email || "").trim());
+    return {
+      person: p.patient_name && p.preferred_name ? ["good", "Done"] : ["bad", "Needed"],
+      caregiver: !contactSet ? ["bad", "No contact"] : state.email_status === "pending" ? ["warn", "Confirm email"] : ["good", "Done"],
+      backup: p.backup_name ? ["good", "Done"] : ["", "Optional"],
+      contacts: state.contacts.length ? ["good", `${state.contacts.length}`] : ["warn", "None yet"],
+      medicines: state.medications.length ? ["good", `${state.medications.length}`] : ["bad", "None"],
+    };
+  }
+  const SECTIONS = [["person", "The person"], ["caregiver", "Caregiver"], ["backup", "Backup contact"], ["contacts", "Trusted contacts"], ["medicines", "Medicines"]];
+
+  function renderNav() {
+    if (!state) return;
+    const st = status();
+    $("nav").replaceChildren(...SECTIONS.map(([id, label]) => h("a", { href: `#${id}`, "aria-current": String(current === id) },
+      h("span", { class: `dot ${st[id][0]}` }), label, h("span", { class: "state" }, st[id][1]))));
+  }
+
+  function setupCard() {
+    const st = status(), p = state.profile;
+    const todo = [
+      st.caregiver[0] === "bad" && ["caregiver", `Add ${p.caregiver_name || "the caregiver"}'s phone or email, so alerts reach someone`],
+      st.caregiver[1] === "Confirm email" && ["caregiver", "Confirm the alert email: click the link Amazon sent to it"],
+      st.contacts[0] !== "good" && ["contacts", "Add trusted numbers (bank, doctor), so impostors are caught"],
+      st.backup[0] !== "good" && ["backup", "Add a backup contact for urgent alerts nobody answers"],
+    ].filter(Boolean);
+    const done = SECTIONS.filter(([id]) => st[id][0] === "good").length;
+    if (!todo.length) return null;
+    return h("section", { class: "card" },
+      h("div", { class: "progress-card" },
+        h("strong", {}, `Setup: ${done} of ${SECTIONS.length} done`),
+        h("div", { class: "bar-track", role: "img", "aria-label": `${done} of ${SECTIONS.length} sections done` }, h("span", { style: `width:${(100 * done) / SECTIONS.length}%` }))),
+      h("ul", { class: "todo" }, todo.map(([id, text]) => h("li", {}, h("span", { class: `dot ${id === "caregiver" ? "bad" : "warn"}` }), h("a", { href: `#${id}` }, text)))));
   }
 
   function render() {
     const p = state.profile;
+    uid = 0;
     const [tone, text] = EMAIL[state.email_status] || EMAIL.unknown;
     const [btone, btext] = EMAIL[state.backup_email_status] || EMAIL.unknown;
-    const testBtn = h("button", { class: "btn", type: "button", onclick: testAlert }, "Send test alert");
-    const reportBtn = h("button", { class: "btn", type: "button", onclick: weeklyReport }, "Send weekly report now");
-    document.getElementById("main").replaceChildren(
-      h("section", { class: "card" }, h("h2", {}, "The person"),
-        h("p", { class: "sub" }, "Who Kinvesper talks with. The short name is what it calls them."),
+    const emergency = h("div", { class: "presets", role: "group", "aria-label": "Common emergency numbers" },
+      ...EMERGENCY.map(([n, where]) => h("button", { class: "preset", type: "button", "aria-pressed": String(p.emergency_number === n), title: where,
+        onclick: () => { p.emergency_number = n; changed(); render(); } }, `${n} · ${where}`)));
+    const scrollY = window.scrollY;
+    $("main").replaceChildren(...[
+      setupCard(),
+      section("person", "The person", "Who Kinvesper talks with, and what it calls them.", [
         h("div", { class: "grid" },
-          field("Full name", p, "patient_name", { required: true }),
-          field("Called", p, "preferred_name", { required: true, placeholder: "first name or nickname" }),
-          field("Pharmacy", p, "pharmacy_name"),
-          field("Emergency number", p, "emergency_number", { inputmode: "numeric", placeholder: "112", hint: "what Kinvesper tells them to call" }))),
-      h("section", { class: "card" }, h("h2", {}, "Caregiver"),
-        h("p", { class: "sub" }, "Suspicious calls, emergencies, missed doses and messages go to this phone and email."),
+          field("Full name", p, "patient_name", { required: true, err: "p.patient_name", autocomplete: "name" }),
+          field("What to call them", p, "preferred_name", { required: true, err: "p.preferred_name", placeholder: "first name or nickname" }),
+          field("Pharmacy", p, "pharmacy_name", { placeholder: "where refills are ordered" }),
+          field("Emergency number", p, "emergency_number", { required: true, inputmode: "numeric", err: "p.emergency_number",
+            hint: "What Kinvesper tells them to call in an emergency.", extra: emergency }))]),
+      section("caregiver", "Caregiver", "Suspicious calls, emergencies, missed doses and messages go to this phone and email.", [
         h("div", { class: "grid" },
-          field("Name", p, "caregiver_name", { required: true }),
-          field("Relationship", p, "caregiver_relation", { placeholder: "daughter" }),
-          field("Phone", p, "caregiver_phone", { type: "tel", placeholder: "+15551234567", hint: "with country code", autocomplete: "tel" }),
-          field("Email", p, "caregiver_email", { type: "email", placeholder: "name@example.com", autocomplete: "email" })),
-        p.caregiver_email ? note(tone, text) : null,
-        p.caregiver_phone ? note("muted", "Texts from a new AWS account only reach numbers verified in the SNS SMS sandbox.") : null,
-        h("div", { class: "row" }, testBtn, reportBtn)),
-      h("section", { class: "card" }, h("h2", {}, "Backup contact"),
-        h("p", { class: "sub" }, `If an urgent alert (a fall, chest pain, a likely scam) isn't acknowledged within ${state.escalate_after_min} minutes, it goes to this person too.`),
+          field("Name", p, "caregiver_name", { required: true, err: "p.caregiver_name" }),
+          field("Relationship", p, "caregiver_relation", { placeholder: "daughter, son, nurse" }),
+          field("Phone", p, "caregiver_phone", { type: "tel", err: "p.caregiver_phone", placeholder: "+91 98765 43210", hint: "With the country code. Gets texts.", autocomplete: "tel" }),
+          field("Email", p, "caregiver_email", { type: "email", err: "p.caregiver_email", placeholder: "name@example.com", hint: "Gets alerts and the weekly report.", autocomplete: "email" })),
+        p.caregiver_email && snapshot() === saved ? note(tone, text) : null,
+        p.caregiver_phone ? note("muted", "Texts from a new AWS account only reach numbers verified in the SNS SMS sandbox; email always works.") : null,
+        h("div", { class: "actions-row" },
+          h("button", { class: "btn", type: "button", onclick: (e) => run(e, "/api/settings/test-alert", "Sending…",
+            (r) => r.sent ? "Test alert sent. Check the phone and inbox." : "Nothing was sent: there's no phone or email to send to here.") }, "Send a test alert"),
+          h("button", { class: "btn", type: "button", onclick: (e) => run(e, "/api/reports/weekly", "Writing the report…",
+            (r) => r.sent ? "Weekly report emailed." : "Report written, but not emailed: no email set up here.") }, "Send the weekly report now"),
+          h("span", { class: "inline-msg", id: "caregiver-msg", role: "status", "aria-live": "polite" }))]),
+      section("backup", "Backup contact", `If an urgent alert (a fall, chest pain, a likely scam) isn't acknowledged within ${state.escalate_after_min} minutes, it goes to this person too.`, [
         h("div", { class: "grid" },
-          field("Name", p, "backup_name", { placeholder: "a neighbour or another relative", wide: true }),
-          field("Phone", p, "backup_phone", { type: "tel", placeholder: "+15551234567", hint: "with country code" }),
-          field("Email", p, "backup_email", { type: "email", placeholder: "name@example.com" })),
-        p.backup_email ? note(btone, btext) : null),
-      h("section", { class: "card" }, h("h2", {}, "Trusted contacts"),
-        h("p", { class: "sub" }, "Real numbers for the bank, doctor and family. When a caller claims to be one of them from another number, Kinvesper says to hang up and gives the real number."),
-        state.contacts.length ? state.contacts.map(contactRow) : h("p", { class: "empty" }, "No trusted contacts yet."),
-        h("div", { class: "row" }, h("button", { class: "btn", type: "button",
-          onclick: () => { state.contacts.push({ name: "", relation: "", phone: "" }); dirty(); render(); } }, "Add contact"))),
-      h("section", { class: "card" }, h("h2", {}, "Medicines"),
-        h("p", { class: "sub" }, "Kinvesper reminds, logs doses and orders refills from this list."),
-        state.medications.length ? state.medications.map(medCard) : h("p", { class: "empty" }, "No medicines yet."),
-        h("div", { class: "row" }, h("button", { class: "btn", type: "button",
-          onclick: () => { state.medications.push({ name: "", dose: "", times: [], pills_remaining: 30, purpose: "", instructions: "" }); dirty(); render(); } },
-          "Add medicine"))),
-    );
+          field("Name", p, "backup_name", { err: "p.backup_name", placeholder: "a neighbour or another relative", wide: true }),
+          field("Phone", p, "backup_phone", { type: "tel", err: "p.backup_phone", placeholder: "+91 98765 43210", hint: "With the country code." }),
+          field("Email", p, "backup_email", { type: "email", err: "p.backup_email", placeholder: "name@example.com" })),
+        p.backup_email && snapshot() === saved ? note(btone, btext) : null], { optional: true }),
+      section("contacts", "Trusted contacts", "Real numbers for the bank, the doctor and family. When a caller claims to be one of them from another number, Kinvesper tells them to hang up and reads out the real number.", [
+        h("div", { class: "items" }, state.contacts.length ? state.contacts.map(contact) : h("p", { class: "empty" }, "No trusted contacts yet. Start with the bank: it's the one scammers pretend to be most.")),
+        h("div", { class: "actions-row" }, h("span", { class: "hint" }, "Add:"),
+          ...CONTACT_PRESETS.map(([label, relation]) => h("button", { class: "preset", type: "button",
+            onclick: () => { state.contacts.push({ name: "", relation, phone: "" }); changed(); render(); focusLast("#contacts .item input"); } }, `+ ${label}`)),
+          h("button", { class: "preset", type: "button", onclick: () => { state.contacts.push({ name: "", relation: "", phone: "" }); changed(); render(); focusLast("#contacts .item input"); } }, "+ Someone else"))]),
+      section("medicines", "Medicines", "Kinvesper reminds, logs doses and orders refills from this list. Click one to edit it.", [
+        errors.meds ? h("p", { class: "error-text" }, errors.meds) : null,
+        h("div", { class: "items" }, state.medications.length ? state.medications.map(medicine) : h("p", { class: "empty" }, "No medicines yet.")),
+        h("div", { class: "actions-row" }, h("button", { class: "btn", type: "button", onclick: () => {
+          state.medications.push({ name: "", dose: "", times: ["08:00"], pills_remaining: 30, purpose: "", instructions: "" });
+          open.add(`m${state.medications.length - 1}`); changed(); render(); focusLast("#medicines .item.open input");
+        } }, "+ Add a medicine"))]),
+    ].filter(Boolean));
+    window.scrollTo({ top: scrollY });
+    renderNav();
+  }
+
+  function focusLast(selector) {  // the first field of the item just added
+    requestAnimationFrame(() => {
+      const items = document.querySelectorAll(selector.replace(" input", ""));
+      items[items.length - 1]?.querySelector("input")?.focus();
+    });
   }
 
   async function call(method, url, body) {
@@ -212,47 +467,82 @@
     return data;
   }
 
-  save.addEventListener("click", async () => {
-    save.disabled = true;
-    say("Saving…");
+  async function run(e, url, pending, done) {
+    const out = $("caregiver-msg");
+    if (snapshot() !== saved) { out.textContent = "Save your changes first."; out.className = "inline-msg error"; return; }
+    e.target.disabled = true; out.textContent = pending; out.className = "inline-msg";
     try {
-      state = await call("PUT", "/api/settings", { profile: state.profile, medications: state.medications, contacts: state.contacts });
-      render();
-      say(state.email_status === "pending" ? "Saved. Check the caregiver's inbox to confirm alert emails." : "Saved.");
-    } catch (e) {
-      save.disabled = false;
-      say(e.message, true);
-    }
-  });
-
-  async function testAlert() {
-    if (!save.disabled) return say("Save your changes first.", true);
-    say("Sending…");
-    try {
-      const r = await call("POST", "/api/settings/test-alert");
-      state = { ...state, email_status: r.email_status, backup_email_status: r.backup_email_status };
-      render();
-      say(r.sent ? "Test alert sent." : "Nothing was sent: alerts are only logged here.", !r.sent);
-    } catch (e) {
-      say(e.message, true);
+      const r = await call("POST", url);
+      if (r.email_status) Object.assign(state, { email_status: r.email_status, backup_email_status: r.backup_email_status });
+      out.textContent = done(r);
+      out.className = r.sent ? "inline-msg" : "inline-msg error";
+    } catch (err) {
+      out.textContent = err.message; out.className = "inline-msg error";
+    } finally {
+      e.target.disabled = false;
     }
   }
 
-  async function weeklyReport() {
-    if (!save.disabled) return say("Save your changes first.", true);
-    say("Writing the report…");
+  async function saveAll() {
+    errors = validate();
+    if (Object.keys(errors).length) {
+      const n = Object.keys(errors).length;
+      say(`Please fix ${n === 1 ? "the highlighted field" : `the ${n} highlighted fields`}.`, true);
+      render();
+      const first = document.querySelector('[aria-invalid="true"], .has-error, .error-text');
+      first && first.scrollIntoView({ block: "center" });
+      document.querySelector('[aria-invalid="true"]')?.focus({ preventScroll: true });
+      return;
+    }
+    $("save").disabled = true; say("Saving…");
     try {
-      const r = await call("POST", "/api/reports/weekly");
-      say(r.sent ? "Weekly report emailed." : "Report written, but nothing was sent: alerts are only logged here.", !r.sent);
+      const body = { profile: { ...state.profile, caregiver_phone: clean(state.profile.caregiver_phone), backup_phone: clean(state.profile.backup_phone) },
+        medications: state.medications.map((m) => ({ ...m, pills_remaining: Number(m.pills_remaining) })), contacts: state.contacts };
+      state = await call("PUT", "/api/settings", body);
+      saved = snapshot(); open.clear();
+      render(); changed();
+      toast(state.email_status === "pending" ? "Saved. Ask the caregiver to confirm the alert email." : "Saved");
     } catch (e) {
       say(e.message, true);
+    } finally {
+      $("save").disabled = false;
     }
   }
+
+  $("save").onclick = saveAll;
+  function restore() {
+    const s = JSON.parse(saved);
+    state.profile = s.p; state.medications = s.m; state.contacts = s.c;
+    errors = {}; open.clear(); render(); changed(); toast("Changes discarded");
+  }
+  $("discard").onclick = restore;
+  addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); if (snapshot() !== saved) saveAll(); } });
+  addEventListener("beforeunload", (e) => { if (state && snapshot() !== saved) e.preventDefault(); });
+
+  // Which section is on screen, for the nav: the last one whose top has passed the header.
+  let ticking = false;
+  addEventListener("scroll", () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      ticking = false;
+      const atBottom = innerHeight + scrollY >= document.documentElement.scrollHeight - 4;
+      const line = matchMedia("(max-width: 900px)").matches ? 140 : 110;
+      const id = atBottom ? SECTIONS[SECTIONS.length - 1][0]
+        : SECTIONS.map(([id]) => id).filter((id) => $(id) && $(id).getBoundingClientRect().top <= line).pop() || "person";
+      if (id !== current) { current = id; renderNav(); }
+    });
+  }, { passive: true });
 
   call("GET", "/api/settings")
-    .then((d) => { state = d; render(); })
-    .catch((e) => document.getElementById("main").replaceChildren(h("p", { class: "msg error" }, `Couldn't load settings: ${e.message}`)));
-  addEventListener("beforeunload", (e) => { if (!save.disabled) e.preventDefault(); });
+    .then((d) => {
+      state = d;
+      state.contacts = state.contacts || [];
+      state.medications.forEach((m) => { m.times = m.times || []; });
+      saved = snapshot();
+      render();
+    })
+    .catch((e) => $("main").replaceChildren(h("p", { class: "empty" }, `Couldn't load settings: ${e.message}`)));
 })();
 </script>
 </body>
