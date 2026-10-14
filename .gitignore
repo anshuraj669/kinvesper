@@ -34,3 +34,6 @@ cdk.context.json
 
 # Logs
 *.log
+
+# screenshots shared during development
+/img.png
