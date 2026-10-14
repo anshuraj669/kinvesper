@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import anyio
 
-from . import contacts, llm, notify, scam
+from . import contacts, llm, notify, scam, when
 from .config import now, settings
 from .models import (
     Alert,
@@ -27,6 +27,8 @@ from .models import (
     Profile,
     Refill,
     RefillResult,
+    Reminder,
+    ReminderResult,
     ScamAssessment,
     ScheduleItem,
     TrustedContact,
@@ -148,6 +150,78 @@ class CareService:
     def add_medication(self, med: Medication) -> Medication:
         self.store.save("med", med)
         return med
+
+    # ---------- one-off reminders and alarms ----------
+
+    def reminders(self, upcoming_only: bool = True) -> list[Reminder]:
+        items = self.store.load_all("reminder", Reminder)
+        if upcoming_only:
+            items = [r for r in items if r.status == "scheduled"]
+        return sorted(items, key=lambda r: r.at)
+
+    async def add_reminder(self, text: str, at: str, important: bool = False) -> ReminderResult:
+        current = now()
+        try:
+            due = when.local(datetime.fromisoformat(at))
+        except ValueError:
+            return ReminderResult(message="I didn't catch the time. When should I remind you?")
+        text = text.strip().rstrip(".")
+        if not text:
+            return ReminderResult(message="What should I remind you about?")
+        if due <= current + timedelta(seconds=30):
+            return ReminderResult(message="That time has already passed. When should I remind you?")
+        if due > current + timedelta(days=366):
+            return ReminderResult(message="I can only set reminders up to a year ahead.")
+        r = Reminder(text=text, at=due.isoformat(timespec="minutes"), important=important,
+                     created_at=current.isoformat())
+        self.store.save("reminder", r)
+        said = when.spoken(due, current)
+        p = self.profile()
+        msg = (f"Okay, important alarm set {said}: {text}. I'll remind you 30 minutes before as well, "
+               f"and let {p.caregiver_name} know at the time." if important
+               else f"Okay, I'll remind you {said}: {text}.")
+        return ReminderResult(reminder=r, message=msg)
+
+    def list_reminders(self) -> ReminderResult:
+        items, current = self.reminders(), now()
+        if not items:
+            return ReminderResult(message="You don't have any reminders set.")
+        said = [f"{'an important alarm for ' if r.important else ''}{r.text} {when.spoken(when.local(datetime.fromisoformat(r.at)), current)}"
+                for r in items[:5]]
+        more = f", and {len(items) - 5} more" if len(items) > 5 else ""
+        return ReminderResult(reminders=items, message=f"You have {len(items)} reminder{'s' * (len(items) > 1)}: "
+                              + "; ".join(said) + more + ".")
+
+    def cancel_reminder(self, query: str = "", reminder_id: str = "") -> ReminderResult:
+        items = self.reminders()
+        if reminder_id:
+            match = next((r for r in items if r.id == reminder_id), None)
+        else:
+            words = set(re.findall(r"[a-z]+", query.lower())) - FILLER - {"reminder", "alarm", "cancel", "delete", "remove", "my"}
+            scored = sorted(((len(words & set(re.findall(r"[a-z]+", r.text.lower()))), r) for r in items),
+                            key=lambda x: -x[0])
+            match = scored[0][1] if scored and scored[0][0] else (items[0] if len(items) == 1 else None)
+        if match is None:
+            return ReminderResult(reminders=items, message="I couldn't find that reminder. " + self.list_reminders().message)
+        match.status = "cancelled"
+        self.store.save("reminder", match)
+        return ReminderResult(reminder=match, message=f"Okay, I've cancelled the reminder for {match.text}.")
+
+    async def _due_reminders(self, current: datetime) -> None:
+        """Due reminders are done; for an important one the caregiver hears about it, once."""
+        p = self.profile()
+        for r in self.reminders():
+            due = when.local(datetime.fromisoformat(r.at))
+            if due > current:
+                continue
+            r.status = "done"
+            if r.important and not r.caregiver_notified:
+                await self.raise_alert(
+                    "warning", "reminder", f"{p.preferred_name}'s important reminder: {r.text}",
+                    f"Set for {when.spoken(due, current).removeprefix('at ')}. You may want to check in with {p.preferred_name}.",
+                    dedupe_key=f"reminder:{r.id}", sms=True)
+                r.caregiver_notified = True
+            self.store.save("reminder", r)
 
     # ---------- settings (caregiver dashboard) ----------
 
@@ -604,6 +678,7 @@ class CareService:
                 )
 
         await self._escalate(current)
+        await self._due_reminders(current)
         week = current.isocalendar()
         if (DAYS[current.weekday()] == settings.report_day and current.strftime("%H:%M") >= settings.report_time
                 and f"report:{week.year}-W{week.week}" not in seen):
@@ -684,6 +759,7 @@ class CareService:
                 for m in self.medications()
             ],
             "refills": [r.model_dump() for r in self.refills()[:5]],
+            "reminders": [r.model_dump() for r in self.reminders()[:10]],
         }
 
     # ---------- summaries ----------

@@ -125,6 +125,8 @@ class FakeRemindersApi:
     def __init__(self, allowed=True):
         self.allowed = allowed
         self.reminders: dict[str, dict] = {}
+        self.timers: dict[str, dict] = {}
+        self.timers_allowed = True
         self.calls: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -132,6 +134,15 @@ class FakeRemindersApi:
         assert request.headers["authorization"] == "Bearer token-123"
         if not self.allowed:
             return httpx.Response(403, json={"code": "UNAUTHORIZED"})
+        if request.url.path.startswith("/v1/alerts/timers"):
+            if not self.timers_allowed:
+                return httpx.Response(403, json={"code": "UNAUTHORIZED"})
+            if request.method == "POST":
+                timer = f"timer-{len(self.calls)}"
+                self.timers[timer] = json.loads(request.content)
+                return httpx.Response(200, json={"id": timer, "status": "ON"})
+            self.timers.pop(request.url.path.rsplit("/", 1)[1], None)
+            return httpx.Response(204)
         if request.method == "POST":
             token = f"alert-{len(self.reminders) + len(self.calls)}"
             self.reminders[token] = json.loads(request.content)
@@ -140,7 +151,6 @@ class FakeRemindersApi:
             self.reminders.pop(request.url.path.rsplit("/", 1)[1], None)
             return httpx.Response(204)
         return httpx.Response(405)
-
 
 
 @pytest.fixture

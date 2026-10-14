@@ -179,6 +179,9 @@
     "permissions": [
       {
         "name": "alexa::alerts:reminders:skill:readwrite"
+      },
+      {
+        "name": "alexa::alerts:timers:skill:readwrite"
       }
     ]
   }

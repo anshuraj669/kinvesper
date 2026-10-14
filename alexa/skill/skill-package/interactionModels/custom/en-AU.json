@@ -22,7 +22,6 @@
             "set up my pill reminders",
             "set up medicine reminders",
             "remind me to take my pills",
-            "remind me to take my medicine",
             "remind me about my medicines",
             "turn on my reminders",
             "turn on pill reminders",
@@ -463,6 +462,56 @@
             {
               "name": {
                 "value": "help me write a birthday card"
+              }
+            },
+            {
+              "name": {
+                "value": "remind me to call Priya at five"
+              }
+            },
+            {
+              "name": {
+                "value": "remind me in two hours to check the oven"
+              }
+            },
+            {
+              "name": {
+                "value": "remind me tomorrow at nine to call the bank"
+              }
+            },
+            {
+              "name": {
+                "value": "set an alarm for my doctor's appointment"
+              }
+            },
+            {
+              "name": {
+                "value": "set an important alarm for ten tomorrow"
+              }
+            },
+            {
+              "name": {
+                "value": "wake me up at seven"
+              }
+            },
+            {
+              "name": {
+                "value": "set a reminder for my friend's birthday"
+              }
+            },
+            {
+              "name": {
+                "value": "what reminders do I have"
+              }
+            },
+            {
+              "name": {
+                "value": "cancel my doctor reminder"
+              }
+            },
+            {
+              "name": {
+                "value": "remind me to water the plants tonight"
               }
             }
           ]

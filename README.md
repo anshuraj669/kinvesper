@@ -7,7 +7,9 @@ and keeps the family caregiver informed.
 - **On any Echo:** "Alexa, open kin vesper", then ask anything: "did I take my pills?", "someone
   says my grandson needs bail money", "tell Priya I'm fine", "what's the weather today?". In English
   or Hindi.
-- **The Echo reminds them:** "set up my pill reminders" has Alexa itself announce every dose time.
+- **The Echo reminds them:** "set up my pill reminders" has Alexa itself announce every dose time;
+  "remind me to call Priya at 5" sets a one-off reminder; "set an alarm for my doctor's appointment"
+  sets an important alarm (a heads-up 30 minutes before, ringing until stopped, and the family told).
 - **Scam shield:** red-flag checks plus the family's trusted numbers, to catch callers pretending to
   be the bank, the doctor or a grandchild.
 - **Family in the loop:** alerts by text and email, a backup contact when nobody answers an urgent
@@ -84,6 +86,8 @@ npx @modelcontextprotocol/inspector      # transport: Streamable HTTP, URL: http
 | `add_medication` | Adds a prescription |
 | `check_for_scam` | Elder-fraud red-flag check plus the caller's number against the trusted contacts; alerts family on anything suspicious |
 | `find_trusted_contact` | The bank's, doctor's or a relative's real number, as the family saved it |
+| `set_reminder` | A one-off reminder at a time; `important` makes it an alarm (heads-up, ringing timer, caregiver told) |
+| `list_reminders`, `cancel_reminder` | Upcoming reminders and alarms; cancel one by what it's about |
 | `daily_check_in` | Mood and symptoms; escalates falls, dizziness and chest pain |
 | `notify_caregiver` | Sends a message to the caregiver |
 | `emergency_help` | Sends an urgent alert immediately |
@@ -186,6 +190,7 @@ calls it every 5 minutes):
 | `LOW_STOCK_THRESHOLD` pills or fewer, no refill underway | info | no |
 | Urgent alert unacknowledged for `ESCALATE_AFTER_MIN` | to the backup contact | backup |
 | `REPORT_DAY` after `REPORT_TIME` (Sunday 18:00): the weekly report, written by Claude | info | email |
+| An important alarm comes due | warning | yes |
 
 Every alert carries a de-duplication key, so a missed dose texts the caregiver once, however
 often the checks run. `uv run kinvesper --check` runs them once, for cron or EventBridge.
@@ -200,6 +205,11 @@ The classic skill in `alexa/skill` reaches Kinvesper from any Echo today (the Al
   creates one daily reminder per dose time with the Alexa Reminders API ("Margaret, it's time for
   your Metformin, 500 mg, and Lisinopril... take with food"). When the medicines change in Settings,
   the reminders are rebuilt the next time the skill opens. "Turn off my reminders" removes them.
+- **One-off reminders and alarms:** Claude saves them with `set_reminder` (it knows the local time:
+  every turn carries a `[Now]` line), and the bridge puts them on the Echo with the same permission.
+  An important alarm adds a heads-up 30 minutes before, a timer that rings until "Alexa, stop" when
+  it's due within 2 hours (the Timers API's limit), and an alert to the caregiver at the time. The
+  dashboard lists them, with Cancel.
 - **Hindi:** the skill has a hi-IN model. The fixed phrases are translated, times are spoken the
   Hindi way ("रात 8 बजे"), and Claude answers in Hindi.
 - **Anything else:** questions outside care (facts, recipes, maths, the weather, the news) are
@@ -264,7 +274,8 @@ src/kinvesper/
   icons.py        SVG icons for tools, resources and prompts
   voice.py        voice agent: Claude tool-use loop over MCP, offline router, spoken elicitation
   alexa.py        Alexa skill bridge (/alexa): Amazon's request checks, sessions, reminders
-  reminders.py    Echo pill reminders through the Alexa Reminders API
+  reminders.py    Echo reminders: pills, one-offs and alarms (Alexa Reminders and Timers APIs)
+  when.py         reading and saying reminder times ("in 2 hours", "at 5 PM tomorrow")
   i18n.py         the skill's fixed phrases in English and Hindi
   contacts.py     trusted contacts: phone number matching and impersonation checks
   listing.py      privacy and terms pages, store icons

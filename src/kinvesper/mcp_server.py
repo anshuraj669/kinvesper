@@ -36,6 +36,7 @@ from .models import (
     MedicationResult,
     NotifyResult,
     RefillResult,
+    ReminderResult,
     ScamAssessment,
     ScheduleResult,
 )
@@ -283,6 +284,47 @@ def build_server(service: CareService) -> KinvesperMCP:
         days: Annotated[int, Field(ge=1, le=30, description="How many days to cover")] = 7,
     ) -> CareSummary:
         return await service.summary(days)
+
+    @mcp.tool(
+        title="Set a reminder or alarm",
+        icons=icon("clock", BLUE),
+        description=(
+            "Remind the person about something once, at a time: 'remind me to call Priya at 5', 'in 2 hours check "
+            "the oven'. Set important=true for an alarm about something that matters (a doctor's appointment, a "
+            "flight, a visitor): it also reminds them 30 minutes before, rings until stopped when it's close, and "
+            "tells the caregiver at the time. Work out `at` from the [Now] line. Not for daily pills: those "
+            "reminders come from the medicine schedule."
+        ),
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+    )
+    async def set_reminder(
+        what: Annotated[str, Field(description="A short phrase, e.g. 'call Priya', 'doctor's appointment'")],
+        at: Annotated[str, Field(description="Local date and time, ISO 8601, e.g. 2026-10-14T17:00")],
+        important: Annotated[bool, Field(description="An alarm for something important")] = False,
+    ) -> ReminderResult:
+        service.touch_activity()  # any interaction counts as activity
+        return await service.add_reminder(what, at, important)
+
+    @mcp.tool(
+        title="Reminders",
+        icons=icon("list", BLUE),
+        description="The person's upcoming one-off reminders and alarms.",
+        annotations=read_only,
+    )
+    def list_reminders() -> ReminderResult:
+        return service.list_reminders()
+
+    @mcp.tool(
+        title="Cancel a reminder",
+        icons=icon("clock", SLATE),
+        description="Cancel an upcoming reminder or alarm, found by what it's about.",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False),
+    )
+    def cancel_reminder(
+        what: Annotated[str, Field(description="What the reminder is about, e.g. 'the doctor'")],
+    ) -> ReminderResult:
+        service.touch_activity()  # any interaction counts as activity
+        return service.cancel_reminder(what)
 
     mcp.task_tools["request_pharmacy_refill"] = (
         "I've sent the refill request to the pharmacy. I'll let you know as soon as it's ready."

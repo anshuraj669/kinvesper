@@ -8,6 +8,7 @@
     POST /api/settings/test-alert    send a test alert to the caregiver's phone and email
     POST /api/reports/weekly         email the caregiver this week's report now
     POST /api/alerts/{id}/ack        acknowledge an alert
+    POST /api/reminders/{id}/cancel  cancel a reminder or alarm (the Echo drops it the next time it's used)
     POST /api/checks                 run the proactive checks now (demo button)
 
 Health data, so with OAuth on the dashboard needs DASHBOARD_KEY (open /dashboard?key=...) and is
@@ -95,6 +96,14 @@ def dashboard_routes(service: CareService) -> list[Route]:
             return JSONResponse({"error": "Unknown alert"}, status_code=404)
         return JSONResponse(alert.model_dump())
 
+    async def cancel_reminder(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        result = service.cancel_reminder(reminder_id=request.path_params["reminder_id"])
+        if result.reminder is None:
+            return JSONResponse({"error": "Unknown reminder"}, status_code=404)
+        return JSONResponse(result.reminder.model_dump())
+
     async def checks(request: Request) -> Response:
         if denied := guard(request):
             return denied
@@ -109,4 +118,5 @@ def dashboard_routes(service: CareService) -> list[Route]:
         Route("/api/reports/weekly", weekly_report, methods=["POST"]),
         Route("/api/alerts/{alert_id}/ack", ack, methods=["POST"]),
         Route("/api/checks", checks, methods=["POST"]),
+        Route("/api/reminders/{reminder_id}/cancel", cancel_reminder, methods=["POST"]),
     ]

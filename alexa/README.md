@@ -111,6 +111,11 @@ Alexa app and the developer console's simulator:
   Settings, the reminders are rebuilt the next time the skill opens. "Turn off my reminders"
   (`RemoveRemindersIntent`) deletes them. Test on an Echo or the Alexa app: the console simulator
   doesn't play reminders.
+- **One-off reminders and alarms:** "remind me to call Priya at 5" or "set an alarm for my doctor's
+  appointment" go through the catch-all to Claude, which saves them with the `set_reminder` tool.
+  The bridge then puts them on the Echo (asking for the reminders and timers permissions by voice
+  the first time). An important alarm gets a heads-up reminder 30 minutes before and, when it's
+  due within 2 hours, a timer that rings until "Alexa, stop".
 - **Hindi (hi-IN):** the same intents with Hindi samples. The bridge speaks Hindi for its own
   phrases, and Claude answers in Hindi (tool results are translated, so care answers take one more
   model call).
@@ -121,7 +126,7 @@ build it, and set **Endpoint → HTTPS** to `https://<service>/alexa` ("My devel
 sub-domain of a domain that has a wildcard certificate": App Runner serves `*.<region>.awsapprunner.com`,
 and with the "trusted certificate" option Alexa fails the TLS check and says "unable to reach the requested skill"). Then:
 
-1. **Permissions** (left menu, under Tools): turn on **Reminders**.
+1. **Permissions** (left menu, under Tools): turn on **Reminders** and **Timers**.
 2. **Hindi:** in the language dropdown at the top left, **Language settings → Add new language →
    Hindi (IN)**, save, then switch to Hindi, paste `interactionModels/custom/hi-IN.json` into its
    JSON Editor, build, and set the same endpoint. Test it by switching the Test tab to Hindi.

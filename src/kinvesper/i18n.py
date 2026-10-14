@@ -30,6 +30,11 @@ TEXT = {
         "reminders_unavailable": "Sorry, reminders aren't available here.",
         "reminder": "{name}, it's time for your {medicines}. {notes} When you've taken them, say: Alexa, tell kin vesper I took my pills.",
         "and": "and",
+        "oneoff": "{name}, here's your reminder: {text}.",
+        "alarm": "{name}, this is your important reminder: {text}.",
+        "heads_up": "{name}, in 30 minutes: {text}.",
+        "reminder_saved": "Thank you. Your reminder is set on this Echo.",
+        "reminder_not_on_echo": "Okay. I've saved the reminder, but without permission this Echo can't ring for it.",
     },
     "hi": {
         "welcome": ("नमस्ते {name}, मैं Kinvesper हूँ। आप अपनी दवाइयों के बारे में पूछ सकते हैं, बता सकते हैं कि दवाई ले ली, "
@@ -54,6 +59,11 @@ TEXT = {
         "reminders_unavailable": "माफ़ कीजिए, यहाँ रिमाइंडर उपलब्ध नहीं हैं।",
         "reminder": "{name}, आपकी {medicines} लेने का समय हो गया है। {notes} दवाई लेने के बाद कहिए: Alexa, kin vesper से कहो मैंने दवाई ले ली।",
         "and": "और",
+        "oneoff": "{name}, आपका रिमाइंडर: {text}।",
+        "alarm": "{name}, यह आपका ज़रूरी रिमाइंडर है: {text}।",
+        "heads_up": "{name}, 30 मिनट में: {text}।",
+        "reminder_saved": "धन्यवाद। आपका रिमाइंडर इस Echo पर सेट हो गया है।",
+        "reminder_not_on_echo": "ठीक है। मैंने रिमाइंडर सेव कर लिया है, पर अनुमति के बिना यह Echo उसके लिए नहीं बजेगा।",
     },
 }
 

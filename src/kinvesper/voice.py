@@ -36,7 +36,7 @@ from mcp.shared.experimental.tasks.helpers import MODEL_IMMEDIATE_RESPONSE_KEY
 from mcp.types import CallToolResult, ElicitResult
 from pydantic import BaseModel
 
-from . import contacts, llm, speech
+from . import contacts, llm, speech, when
 from .i18n import LANGUAGES
 from .config import now, settings
 from .scam import rule_assess
@@ -126,6 +126,9 @@ def spoken_text(data: dict | None) -> str:
 EMERGENCY = re.compile(r"\b(i fell|fallen|fell down|chest pain|can'?t breathe|emergency|help me|hurt myself|bleeding)\b")
 NOTIFY = re.compile(r"\b(?:tell|message|text|let)\s+(\w+)(?:\s+know)?(?:\s+that)?\s*(.*)", re.S)
 REFILL = re.compile(r"\b(refill|more of my|run(?:ning)? out|order (?:more|my)|new prescription)\b")
+REMIND = re.compile(r"\b(remind me|set (?:an? )?(?:important )?(?:alarm|reminder)|wake me up)\b")
+REMINDERS = re.compile(r"\b(?:what|which|any|my|list) (?:\w+ )?(?:reminders|alarms)\b")
+CANCEL_REMINDER = re.compile(r"\b(cancel|delete|remove|turn off)\b.*\b(reminder|alarm)\b")
 CLOCK = re.compile(r"\b(what(?:'?s| is) the time|what time is it|time (?:is it )?(?:right )?now|what(?:'?s| is) (?:the )?(?:date|day) today|what day is (?:it|today))\b")
 TOOK = re.compile(r"\b(i (?:just )?took|i'?ve (?:just )?taken|i have taken|just had my)\b")
 SCHEDULE = re.compile(r"\b(pills?|medicines?|medications?|meds|tablets?|dose|what'?s next)\b")
@@ -172,6 +175,13 @@ def route(text: str, meds: list[dict], caregiver: str) -> tuple[str, dict] | Non
         return "request_pharmacy_refill", {"medication": text, "fulfillment": "delivery" if "deliver" in t else "pickup"}
     if rule_assess(t)[2] >= 2 or (CALLED.search(t) and contacts.numbers_in(t)):
         return "check_for_scam", {"description": text}
+    if CANCEL_REMINDER.search(t) and "pill" not in t:
+        return "cancel_reminder", {"what": text}
+    if REMIND.search(t) and (at := when.parse(t, now())):
+        important = bool(re.search(r"\b(alarm|important|appointment|wake me)\b", t))
+        return "set_reminder", {"what": when.what(text), "at": at.isoformat(timespec="minutes"), "important": important}
+    if REMINDERS.search(t):
+        return "list_reminders", {}
     if LOOKUP.search(t):
         return "find_trusted_contact", {"who": text}
     if TOOK.search(t):

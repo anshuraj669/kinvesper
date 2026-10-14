@@ -1,11 +1,14 @@
 """Echo pill reminders through the Alexa Reminders API (a fake API here)."""
 
+from datetime import datetime
+
 import httpx
 import pytest
 from conftest import SYSTEM
 
 from kinvesper import voice
 from kinvesper.alexa import AlexaBridge
+from kinvesper.config import settings
 from kinvesper.reminders import EchoReminders, reminder_text
 from kinvesper.voice import VoiceSessions
 
@@ -59,7 +62,7 @@ async def test_asks_for_permission_by_voice_then_sets_them(bridge, api):
     api.allowed = True
     answer = {"session": {"sessionId": "s1"}, "context": {"System": SYSTEM},
               "request": {"type": "Connections.Response", "name": "AskFor", "locale": "en-US",
-                          "payload": {"permissionScopes": [{"permissionScope": "x", "status": "ACCEPTED"}]}}}
+                          "payload": {"permissionScopes": [{"permissionScope": "alexa::alerts:reminders:skill:readwrite", "status": "ACCEPTED"}]}}}
     assert "Every day at" in _said(await bridge.handle(answer))
     assert len(api.reminders) == 3
 
@@ -100,3 +103,97 @@ def test_reminder_text_includes_instructions(service):
     meds = [m for m in service.medications() if m.name == "Metformin"]
     text = reminder_text(service.profile(), meds)
     assert "Metformin, 500 mg" in text and "take with food" in text
+
+
+# ---------- one-off reminders and important alarms ----------
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    from kinvesper import reminders, service as service_module, voice as voice_module
+    state = {"t": datetime(2026, 10, 14, 14, 0, tzinfo=settings.tz)}
+    for module in (service_module, reminders, voice_module):
+        monkeypatch.setattr(module, "now", lambda: state["t"])
+    return state
+
+
+async def test_one_off_reminder(service, clock):
+    out = await service.add_reminder("call Priya", "2026-10-14T17:00")
+    assert out.message == "Okay, I'll remind you at 5 PM today: call Priya."
+    assert service.list_reminders().message == "You have 1 reminder: call Priya at 5 PM today."
+    bad = await service.add_reminder("call Priya", "2026-10-14T09:00")
+    assert "already passed" in bad.message and bad.reminder is None
+    assert "time" in (await service.add_reminder("x", "tomorrowish")).message
+
+
+async def test_cancel_by_what_it_is_about(service, clock):
+    await service.add_reminder("call Priya", "2026-10-14T17:00")
+    await service.add_reminder("doctor's appointment", "2026-10-16T10:00", important=True)
+    out = service.cancel_reminder("cancel the doctor reminder")
+    assert out.reminder.text == "doctor's appointment" and out.reminder.status == "cancelled"
+    assert [r.text for r in service.reminders()] == ["call Priya"]
+
+
+async def test_important_alarm_tells_the_caregiver_when_due(service, clock):
+    out = await service.add_reminder("doctor's appointment", "2026-10-14T15:00", important=True)
+    assert "important alarm" in out.message and "Priya" in out.message
+    clock["t"] = datetime(2026, 10, 14, 15, 2, tzinfo=settings.tz)
+    await service.run_checks()
+    await service.run_checks()
+    alerts = [a for a in service.alerts() if a.kind == "reminder"]
+    assert len(alerts) == 1 and "doctor's appointment" in alerts[0].title
+    assert not service.reminders()  # done
+
+
+async def test_echo_gets_reminder_heads_up_and_ringing_timer(bridge, api, service, clock):
+    await service.add_reminder("call Priya", "2026-10-14T17:00")
+    await service.add_reminder("doctor's appointment", "2026-10-14T15:30", important=True)
+    await service.add_reminder("flight to Delhi", "2026-10-15T09:00", important=True)
+    assert await bridge.reminders.push(SYSTEM, service.profile(), service.reminders(), "en-US") == "ok"
+
+    spoken = sorted((b["trigger"]["scheduledTime"], b["alertInfo"]["spokenInfo"]["content"][0]["text"])
+                    for b in api.reminders.values())
+    assert spoken == [
+        ("2026-10-14T15:00:00.000", "Margaret, in 30 minutes: doctor's appointment."),
+        ("2026-10-14T15:30:00.000", "Margaret, this is your important reminder: doctor's appointment."),
+        ("2026-10-14T17:00:00.000", "Margaret, here's your reminder: call Priya."),
+        ("2026-10-15T08:30:00.000", "Margaret, in 30 minutes: flight to Delhi."),
+        ("2026-10-15T09:00:00.000", "Margaret, this is your important reminder: flight to Delhi."),
+    ]
+    (timer,) = api.timers.values()  # only the alarm within 2 hours rings until stopped
+    assert timer["duration"] == "PT5400S" and timer["triggeringBehavior"]["notificationConfig"]["playAudible"]
+
+    await bridge.reminders.push(SYSTEM, service.profile(), service.reminders(), "en-US")
+    assert len(api.reminders) == 5  # pushed once
+    service.cancel_reminder("the doctor")
+    await bridge.reminders.push(SYSTEM, service.profile(), service.reminders(upcoming_only=False), "en-US")
+    assert len(api.reminders) == 3 and not api.timers
+
+
+async def test_voice_reminder_asks_permission_then_rings(bridge, api, service, clock, monkeypatch):
+    monkeypatch.setattr(voice.llm, "enabled", lambda: False)
+    api.allowed = False
+    said = {"session": {"sessionId": "r1"}, "context": {"System": SYSTEM},
+            "request": {"type": "IntentRequest", "locale": "en-US", "intent": {
+                "name": "CatchAllIntent", "slots": {"utterance": {"value": "remind me to call Priya at 5 PM"}}}}}
+    ask = await bridge.handle(said)
+    directive = ask["response"]["directives"][0]
+    assert directive["token"] == "oneoff"
+    assert [s["permissionScope"] for s in directive["payload"]["permissionScopes"]] == [
+        "alexa::alerts:reminders:skill:readwrite", "alexa::alerts:timers:skill:readwrite"]
+    assert [r.text for r in service.reminders()] == ["call Priya"]  # saved even before permission
+
+    api.allowed = True
+    answer = {"session": {"sessionId": "r1"}, "context": {"System": SYSTEM},
+              "request": {"type": "Connections.Response", "name": "AskFor", "token": "oneoff", "locale": "en-US",
+                          "payload": {"permissionScopes": [
+                              {"permissionScope": "alexa::alerts:reminders:skill:readwrite", "status": "ACCEPTED"}]}}}
+    assert "set on this Echo" in (await bridge.handle(answer))["response"]["outputSpeech"]["text"]
+    assert len(api.reminders) == 1
+
+
+async def test_timer_permission_missing_still_sets_the_reminders(bridge, api, service, clock):
+    api.timers_allowed = False
+    await service.add_reminder("take the cake out", "2026-10-14T14:40", important=True)
+    assert await bridge.reminders.push(SYSTEM, service.profile(), service.reminders(), "en-US") == "ok"
+    assert len(api.reminders) == 2 and not api.timers  # the heads-up and the alarm still play; no ringing timer

@@ -1,9 +1,13 @@
-"""Pill reminders the Echo speaks itself, through the Alexa Reminders API.
+"""Reminders the Echo speaks itself, through the Alexa Reminders and Timers APIs.
 
 One daily reminder per dose time ("Margaret, it's time for your Metformin and Lisinopril..."), created
 with the skill request's API token once the person allows reminders (by voice: "set up my pill
 reminders"). The medicine list lives in Kinvesper, so whenever it changes in Settings the reminders
 are rebuilt on the next visit to the skill. One record per Alexa account remembers what was created.
+
+One-off reminders ("remind me to call Priya at 5") are saved in Kinvesper by the voice agent's tools,
+then pushed to the Echo. An important one is an alarm: a heads-up reminder 30 minutes before, and,
+when it's due within 2 hours (the Timers API's limit), a timer that rings until "Alexa, stop".
 """
 
 from __future__ import annotations
@@ -12,22 +16,26 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import httpx
 
 from .config import now, settings
 from .i18n import hindi_time, joined, lang, t
-from .models import Medication, Profile
+from .models import Medication, Profile, Reminder
 from .service import spoken_time
 from .store import Store
 
 log = logging.getLogger(__name__)
 
 SCOPE = "alexa::alerts:reminders:skill:readwrite"
+TIMER_SCOPE = "alexa::alerts:timers:skill:readwrite"
 PATH = "/v1/alerts/reminders"
+TIMER_PATH = "/v1/alerts/timers"
 TIMEOUT_S = 4
+HEADS_UP = timedelta(minutes=30)
+MAX_TIMER = timedelta(hours=2)  # the Timers API's limit
 
 Outcome = Literal["ok", "unchanged", "no_permission", "error"]
 
@@ -71,6 +79,28 @@ def reminder_body(text: str, time: str, locale: str) -> dict:
         },
         "alertInfo": {"spokenInfo": {"content": [{"locale": locale, "text": text[:250]}]}},
         "pushNotification": {"status": "ENABLED"},
+    }
+
+
+def one_off_body(text: str, at: datetime, locale: str) -> dict:
+    return {
+        "requestTime": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000"),
+        "trigger": {"type": "SCHEDULED_ABSOLUTE", "scheduledTime": at.strftime("%Y-%m-%dT%H:%M:%S.000"),
+                    "timeZoneId": tz_name()},
+        "alertInfo": {"spokenInfo": {"content": [{"locale": locale, "text": text[:250]}]}},
+        "pushNotification": {"status": "ENABLED"},
+    }
+
+
+def timer_body(text: str, duration: timedelta, locale: str) -> dict:
+    return {
+        "duration": f"PT{max(1, int(duration.total_seconds()))}S",
+        "timerLabel": text[:256],
+        "creationBehavior": {"displayExperience": {"visibility": "VISIBLE"}},
+        "triggeringBehavior": {
+            "operation": {"type": "ANNOUNCE", "textToAnnounce": [{"locale": locale, "text": text[:250]}]},
+            "notificationConfig": {"playAudible": True},
+        },
     }
 
 
@@ -123,6 +153,55 @@ class EchoReminders:
         self.store.put("echo_reminders", self._key(user), {"signature": signature, "tokens": tokens})
         log.info("Echo reminders set for %s", ", ".join(groups))
         return SyncResult("ok", list(groups))
+
+    async def push(self, system: dict, profile: Profile, reminders: list[Reminder], locale: str) -> Outcome:
+        """Put Kinvesper's upcoming one-off reminders on this Alexa account's Echo, and take cancelled
+        ones off. Safe to call often: each reminder is pushed once."""
+        user = ((system.get("user") or {}).get("userId")) or ""
+        if not user or not system.get("apiAccessToken"):
+            return "error"
+        key, current = self._key(user), now()
+        record: dict = self.store.get("echo_oneoff", key) or {}
+        upcoming = {r.id: r for r in reminders if r.status == "scheduled"}
+        outcome: Outcome = "ok"
+        async with self._client(system) as http:
+            try:
+                for rid in [rid for rid in record if rid not in upcoming]:  # cancelled or done
+                    entry = record.pop(rid)
+                    for token in entry.get("tokens", []):
+                        await http.delete(f"{PATH}/{token}")
+                    if entry.get("timer"):
+                        await http.delete(f"{TIMER_PATH}/{entry['timer']}")
+                for r in upcoming.values():
+                    at = datetime.fromisoformat(r.at).astimezone(settings.tz)
+                    if r.id in record or at <= current:
+                        continue
+                    entry = {"tokens": []}
+                    name = profile.preferred_name
+                    times = [(at, t(locale, "alarm" if r.important else "oneoff", name=name, text=r.text))]
+                    if r.important and at - current > HEADS_UP + timedelta(minutes=5):
+                        times.append((at - HEADS_UP, t(locale, "heads_up", name=name, text=r.text)))
+                    for when_, text in times:
+                        resp = await http.post(PATH, json=one_off_body(text, when_, locale))
+                        if resp.status_code in (401, 403):
+                            outcome = "no_permission"
+                            break
+                        resp.raise_for_status()
+                        entry["tokens"].append(resp.json()["alertToken"])
+                    if outcome == "no_permission":
+                        break
+                    if r.important and at - current <= MAX_TIMER:  # rings until "Alexa, stop"
+                        resp = await http.post(TIMER_PATH, json=timer_body(times[0][1], at - current, locale))
+                        if resp.status_code < 300:
+                            entry["timer"] = resp.json().get("id")
+                        else:
+                            log.info("No ringing timer for %s (HTTP %s); the reminder still plays", r.id, resp.status_code)
+                    record[r.id] = entry
+            except (httpx.HTTPError, KeyError, ValueError) as e:
+                log.warning("Couldn't put reminders on the Echo: %s", e)
+                outcome = "error"
+        self.store.put("echo_oneoff", key, record)
+        return outcome
 
     async def clear(self, system: dict) -> Outcome:
         user = ((system.get("user") or {}).get("userId")) or ""

@@ -52,6 +52,7 @@
   .card .sub { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
   .span-3 { grid-column: span 3; } .span-4 { grid-column: span 4; } .span-5 { grid-column: span 5; }
   .span-6 { grid-column: span 6; } .span-7 { grid-column: span 7; } .span-8 { grid-column: span 8; }
+  .span-12 { grid-column: 1 / -1; }
   /* stat tiles */
   .tile .label { font-size: 13px; color: var(--ink-2); }
   .tile .value { font-size: 30px; font-weight: 650; line-height: 1.2; margin-top: 4px; }
@@ -99,7 +100,7 @@
   @media (max-width: 900px) {
     main { grid-template-columns: repeat(2, 1fr); padding: 16px; }
     .span-3 { grid-column: span 1; }
-    .span-4, .span-5, .span-6, .span-7, .span-8 { grid-column: 1 / -1; }
+    .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: 1 / -1; }
     .tile.hero .value { font-size: 44px; }
   }
 </style>
@@ -123,7 +124,7 @@
   const MOODS = ["great", "good", "okay", "low", "unwell"];
   const STATUS = {
     taken: ["good", "Taken"], due: ["warning", "Due now"], missed: ["critical", "Missed"], upcoming: ["muted", "Upcoming"],
-    urgent: ["critical", "Urgent"], warning: ["warning", "Warning"], info: ["muted", "Info"],
+    urgent: ["critical", "Urgent"], warning: ["warning", "Warning"], info: ["muted", "Info"], alarm: ["warning", "Alarm"],
   };
   const ICONS = {
     good: '<circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -277,6 +278,11 @@
     return box;
   }
 
+  async function cancelReminder(id) {
+    const r = await fetch(`/api/reminders/${id}/cancel`, { method: "POST", headers });
+    if (r.ok) { toast("Reminder cancelled"); load(); }
+  }
+
   async function ack(id) {
     const r = await fetch(`/api/alerts/${id}/ack`, { method: "POST", headers });
     if (r.ok) { toast("Alert acknowledged"); load(); }
@@ -319,6 +325,16 @@
           h("div", { class: "detail" }, r.status_message), h("div", { class: "meta" }, ago(r.updated_at))))))
       : h("p", { class: "empty" }, "No refill requests yet.");
 
+    const when = (iso) => new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const reminders = d.reminders.length
+      ? h("ul", { class: "rows" }, d.reminders.map((r) => h("li", {},
+          h("div", { class: "main" },
+            h("div", { class: "title" }, r.text),
+            h("div", { class: "meta" }, r.important ? status("alarm") : null, r.important ? " · " : "", when(r.at),
+              r.important ? " · heads-up 30 min before, you're told at the time" : "")),
+          h("button", { class: "btn", type: "button", onclick: () => cancelReminder(r.id) }, "Cancel"))))
+      : h("p", { class: "empty" }, `No reminders. ${p.preferred_name} can say “remind me to call ${p.caregiver_name} at 5” or “set an alarm for my doctor's appointment”.`);
+
     const pct = d.adherence.pct === null ? "—" : `${Math.round(d.adherence.pct)}%`;
     document.getElementById("main").replaceChildren(
       tile("7-day adherence", pct, `${d.adherence.taken} of ${d.adherence.scheduled} doses taken`, "hero"),
@@ -338,6 +354,7 @@
           d.checkins.map((c) => [day(c.at, { weekday: "short", month: "short", day: "numeric" }), c.mood, c.notes || "—"]))),
       card("span-7", "Medications", null, meds),
       card("span-5", "Pharmacy refills", p.pharmacy_name, refills),
+      card("span-12", "Reminders and alarms", "Set by voice. Alarms ring on the Echo and alert you when they're due.", reminders),
     );
   }
 

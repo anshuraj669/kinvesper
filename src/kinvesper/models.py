@@ -67,7 +67,7 @@ class DoseLog(BaseModel):
 
 AlertLevel = Literal["info", "warning", "urgent"]
 AlertKind = Literal[
-    "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock", "test", "report"
+    "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock", "test", "report", "reminder"
 ]
 
 
@@ -166,6 +166,25 @@ class ScamAssessment(BaseModel):
 class ContactResult(BaseModel):
     found: bool
     contact: TrustedContact | None = None
+    message: str
+
+
+class Reminder(BaseModel):
+    """A one-off reminder ("call Priya at 5"). Important ones are alarms: an extra heads-up, a timer
+    that rings until stopped when it's close, and the caregiver hears about it at the time."""
+
+    id: str = Field(default_factory=lambda: new_id("rem"))
+    text: str = Field(description="What to remind them about, e.g. 'call Priya'")
+    at: str = Field(description="Local date and time, ISO 8601")
+    important: bool = False
+    status: Literal["scheduled", "done", "cancelled"] = "scheduled"
+    created_at: str = ""
+    caregiver_notified: bool = False
+
+
+class ReminderResult(BaseModel):
+    reminder: Reminder | None = None
+    reminders: list[Reminder] = Field(default_factory=list)
     message: str
 
 

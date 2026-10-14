@@ -95,4 +95,5 @@ def test_hindi_skill_package():
     assert any("रिमाइंडर" in s for s in intents["SetUpRemindersIntent"]["samples"])
     manifest = json.loads((SKILL / "skill.json").read_text())["manifest"]
     assert "hi-IN" in manifest["publishingInformation"]["locales"] and "hi-IN" in manifest["privacyAndCompliance"]["locales"]
-    assert manifest["permissions"] == [{"name": "alexa::alerts:reminders:skill:readwrite"}]
+    assert {"name": "alexa::alerts:reminders:skill:readwrite"} in manifest["permissions"]
+    assert {"name": "alexa::alerts:timers:skill:readwrite"} in manifest["permissions"]
