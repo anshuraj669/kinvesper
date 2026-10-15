@@ -12,8 +12,16 @@ and keeps the family caregiver informed.
   sets an important alarm (a heads-up 30 minutes before, ringing until stopped, and the family told).
 - **Scam shield:** red-flag checks plus the family's trusted numbers, to catch callers pretending to
   be the bank, the doctor or a grandchild.
-- **Family in the loop:** alerts by text and email, a backup contact when nobody answers an urgent
-  alert, a weekly report, and a dashboard where the household is set up.
+- **Family in the loop:** alerts by text and email, a phone call for anything urgent, a backup contact
+  when nobody answers, a daily "I'm okay" check-in, a weekly report, and messages typed in the
+  dashboard that the Echo reads out.
+- **Medicine safety:** "can I take ibuprofen?" is checked against their medicines in the FDA's drug
+  labels; a photo of a prescription fills in the medicine list; asking about pills again and again
+  is gently flagged to the family.
+- **For the family and the doctor:** "Ask Kinvesper" answers questions about the week from the real
+  data, and a printable doctor-visit summary has adherence, symptoms and questions to ask.
+- **Company:** "let's chat" starts a conversation about their life; the memories they share are
+  kept for the family.
 
 ## Architecture
 
@@ -43,7 +51,7 @@ flowchart LR
 | Compute | App Runner (one container: MCP server, Alexa bridge, voice agent, dashboard) |
 | Data | DynamoDB (one table), Secrets Manager (keys and tokens) |
 | Identity | Cognito (OAuth 2.1 for `/mcp` and Alexa+ account linking) |
-| Alerts | SNS (SMS to the phone, email to the caregiver and the backup contact) |
+| Alerts | SNS (SMS to the phone, email to the caregiver and the backup contact), End User Messaging (spoken phone calls for urgent alerts) |
 | Schedules | EventBridge (proactive checks every 5 minutes) |
 | Speech (simulator) | Transcribe (speech to text), Polly (text to speech) |
 | Ops | CloudWatch (logs, a 5xx alarm), ECR (the image) |
@@ -93,6 +101,9 @@ npx @modelcontextprotocol/inspector      # transport: Streamable HTTP, URL: http
 | `emergency_help` | Sends an urgent alert immediately |
 | `get_care_summary` | Adherence stats plus a written weekly summary |
 | `request_pharmacy_refill` | Orders a refill; runs as an async **task** with progress updates |
+| `check_medicine_interactions` | "Can I take ibuprofen?": the FDA drug labels (openFDA) read by Claude, against their medicines |
+| `get_family_messages` | Messages the family typed in the dashboard, read out once |
+| `start_conversation`, `save_memory` | Companionship: a gentle question about their life; memories they share, kept for the family |
 
 **Resources:** `care://profile`, `care://medications`, `care://today`, `care://alerts`, `care://refills`.
 **Prompts:** `morning_check_in`, `weekly_caregiver_report`.
@@ -179,6 +190,16 @@ Settings also holds:
   impersonation (high risk, the caregiver is alerted, and Kinvesper reads out the real number to
   call back on). A matching number never lowers the risk: caller ID can be faked.
 - **Send weekly report now,** besides the automatic one.
+- **Scan a prescription:** a photo of a prescription or pill box; Claude reads the medicines, doses
+  and times ("BD" becomes 8 AM and 8 PM, "as needed" medicines are set aside) for the caregiver to
+  check before saving. New medicines are checked for interactions with the rest.
+- **A daily "I'm okay" check-in** time: the Echo asks, and silence tells the family.
+
+The dashboard also has **Ask Kinvesper** (Claude answers questions about the last two weeks from the
+care data, and says so when it doesn't track something), **Send a message** (read out on the Echo
+next time, with "heard" shown), **Memories** from companionship chats, and a printable **Doctor
+visit** summary (`/dashboard/doctor`): adherence per medicine and by time of day, mood, symptoms,
+events and questions to ask, counted only from the day Kinvesper started being used.
 
 A scheduler inside the server runs every `SCHEDULER_INTERVAL_S` seconds (in the cloud, EventBridge
 calls it every 5 minutes):
@@ -191,6 +212,10 @@ calls it every 5 minutes):
 | Urgent alert unacknowledged for `ESCALATE_AFTER_MIN` | to the backup contact | backup |
 | `REPORT_DAY` after `REPORT_TIME` (Sunday 18:00): the weekly report, written by Claude | info | email |
 | An important alarm comes due | warning | yes |
+| Nothing heard `CHECKIN_GRACE_MIN` after the daily check-in time | warning | yes |
+| Urgent alert unacknowledged for `CALL_AFTER_MIN` (an emergency: at once) | phone call | yes, if `VOICE_CALL_FROM` is set |
+| The same question `REPEAT_THRESHOLD` times in a day (a double dose attempt: twice) | info (warning) | no (yes) |
+| A possible medicine interaction | info, warning if serious | dashboard |
 
 Every alert carries a de-duplication key, so a missed dose texts the caregiver once, however
 often the checks run. `uv run kinvesper --check` runs them once, for cron or EventBridge.
@@ -210,6 +235,10 @@ The classic skill in `alexa/skill` reaches Kinvesper from any Echo today (the Al
   An important alarm adds a heads-up 30 minutes before, a timer that rings until "Alexa, stop" when
   it's due within 2 hours (the Timers API's limit), and an alert to the caregiver at the time. The
   dashboard lists them, with Cancel.
+- **Echo Show:** every reply also shows today's medicines in large print, with a "Taken" button for
+  each dose that's due.
+- **Family messages** typed in the dashboard are read out when the skill opens.
+- **Daily check-in:** the Echo asks at the time set in Settings ("please let me know you're okay").
 - **Hindi:** the skill has a hi-IN model. The fixed phrases are translated, times are spoken the
   Hindi way ("रात 8 बजे"), and Claude answers in Hindi.
 - **Anything else:** questions outside care (facts, recipes, maths, the weather, the news) are
@@ -221,6 +250,11 @@ The classic skill in `alexa/skill` reaches Kinvesper from any Echo today (the Al
   schedule the family saved, through the tools; Claude doesn't guess them. Care questions are
   answered with the tool's own spoken reply, built from the real data, so doses can't be misstated.
 - **Double-dose guard.** Logging a dose that's already taken says clearly: don't take another.
+- **Interaction checks cite the FDA labels** and never call a combination safe: "no problem found in
+  the labels, still check with your pharmacist". A scanned prescription is never saved until a person
+  has checked it.
+- **Repeated questions are an observation, not a diagnosis:** the family note says it can be habit
+  or worry, and to mention it to the doctor if it keeps happening.
 - **Emergencies:** "I fell" or "chest pain" alerts the family at once and tells the person to call
   the local emergency number (set in Settings: 112, 911, 999...). Kinvesper doesn't contact
   emergency services itself, and never claims help is on the way.
@@ -281,6 +315,8 @@ src/kinvesper/
   listing.py      privacy and terms pages, store icons
   web.py          voice simulator routes (/voice, /api/voice/...)
   dashboard.py    caregiver dashboard routes (/dashboard, /api/dashboard, ...)
+  interactions.py medicine interaction checks: openFDA drug labels read by Claude
+  apl.py          the Echo Show screen (Alexa Presentation Language)
   scheduler.py    proactive checks on a timer (missed doses, inactivity, low stock)
   static/         simulator and dashboard pages
   service.py      care logic (schedule, dose guard, alerts, check-ins, summaries)
@@ -302,7 +338,10 @@ Details and the AWS services per phase are in [PHASES.md](PHASES.md).
 - [x] **Phase 5:** AWS deployment (App Runner, DynamoDB, Cognito, SNS, EventBridge, CDK)
 - [x] **Phase 6:** Alexa skill bridge, Claude API brain with web search, household settings,
   trusted contacts, escalation to a backup contact, weekly report, Echo reminders, Hindi
-- [ ] **Next:** WhatsApp alerts, multi-family accounts, Alexa+ add-on (waiting on the allowlist)
+- [x] **Phase 7:** medicine interaction checks (FDA labels), prescription photos, Ask Kinvesper,
+  daily check-in, phone calls for urgent alerts, repeated-question notes, doctor visit summary,
+  family messages, companionship and memories, Echo Show screen
+- [ ] **Next:** multi-family accounts, Alexa+ add-on (waiting on the allowlist)
 
 ## License
 

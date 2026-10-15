@@ -281,6 +281,20 @@
     background: var(--critical-soft); box-shadow: 0 0 0 1.5px var(--critical) inset; }
   input:not([type="checkbox"])[aria-invalid="true"]:focus { box-shadow: 0 0 0 2px var(--critical) inset, 0 0 0 5px var(--critical-soft); }
   .layout { grid-template-columns: 240px 1fr; }
+  /* scan results and interaction findings */
+  .panel { margin: 0 0 14px; padding: 14px 16px; border-radius: 18px; background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; font-size: 14px; }
+  .panel.busy { color: var(--ink-2); }
+  .panel h3 { margin: 0 0 6px; font-size: 14.5px; }
+  .panel p { margin: 4px 0; color: var(--ink-2); }
+  .findings { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+  .findings li { padding: 10px 12px; border-radius: 14px; background: var(--glass-strong); box-shadow: 0 0 0 1px var(--well-edge) inset; }
+  .sev { font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-right: 6px; text-transform: uppercase; letter-spacing: .03em; }
+  .sev.serious { background: var(--critical-soft); color: var(--critical); }
+  .sev.moderate { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--warning-ink); }
+  .sev.minor { background: var(--well); color: var(--ink-2); }
+  .spin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--brand);
+    animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   /* the save bar floats up as a glass capsule */
   .savebar { left: 16px; right: 16px; bottom: 16px; max-width: 760px; margin: 0 auto; border: none; border-radius: 999px; padding: 10px 10px 10px 22px;
     background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
@@ -320,6 +334,7 @@
   <button class="btn primary" id="save" type="button">Save changes</button>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="photo" accept="image/*" hidden>
 <script>
 (() => {
   const key = new URLSearchParams(location.search).get("key") || "";
@@ -387,6 +402,7 @@
     for (const [k, label] of [["patient_name", "Full name"], ["preferred_name", "What to call them"], ["caregiver_name", "The caregiver's name"]])
       if (!(p[k] || "").trim()) e[`p.${k}`] = `${label} is needed.`;
     if (!/^\d{2,6}$/.test(p.emergency_number || "")) e["p.emergency_number"] = "Use the short local number, like 112 or 911.";
+    if (p.checkin_time && !TIME.test(p.checkin_time)) e["p.checkin_time"] = "Pick a time, or turn the check-in off.";
     for (const who of ["caregiver", "backup"]) {
       if (p[`${who}_phone`] && !PHONE.test(clean(p[`${who}_phone`]))) e[`p.${who}_phone`] = "Start with + and the country code, like +91 98765 43210.";
       if (p[`${who}_email`] && !EMAIL_RE.test(p[`${who}_email`].trim())) e[`p.${who}_email`] = "That email address doesn't look right.";
@@ -535,6 +551,99 @@
       h("ul", { class: "todo" }, todo.map(([id, text]) => h("li", {}, h("span", { class: `dot ${id === "caregiver" ? "bad" : "warn"}` }), h("a", { href: `#${id}` }, text)))));
   }
 
+  // ---- prescription photos and interaction checks ----
+  const scan = { busy: false, notes: "", added: 0, error: "", known: [], asNeeded: [] };
+  const base = (name) => (name || "").toLowerCase().split(/\s+(?=\d)/)[0].replace(/[^a-z0-9\- ]/g, "").trim();
+  function addMedicine(m, times) {
+    state.medications.push({ name: m.name, dose: m.dose, times, pills_remaining: m.pills_remaining || 30, purpose: m.purpose, instructions: m.instructions });
+    open.add(`m${state.medications.length - 1}`);
+  }
+  let findings = null;  // {busy, title, result}
+
+  function interactionList(result) {
+    return h("ul", { class: "findings" }, result.interactions.map((i) => h("li", {},
+      h("span", { class: `sev ${i.severity}` }, i.severity), h("strong", {}, i.medicines.join(" + ")), h("p", {}, i.explanation))));
+  }
+  function scanPanel() {
+    if (scan.busy) return h("div", { class: "panel busy", role: "status" }, h("span", { class: "spin" }), "Reading the photo…");
+    if (scan.error) return h("div", { class: "panel", role: "alert" }, h("p", { class: "error-text" }, scan.error));
+    if (!scan.added && !scan.notes && !scan.known.length && !scan.asNeeded.length) return null;
+    const title = scan.added ? `Added ${scan.added} medicine${scan.added > 1 ? "s" : ""} from the photo. Check the details, then save.`
+      : scan.known.length || scan.asNeeded.length ? "Nothing new to add from the photo." : "No medicines found in the photo.";
+    return h("div", { class: "panel", role: "status" },
+      h("h3", {}, title),
+      scan.notes ? h("p", {}, scan.notes) : null,
+      scan.known.length ? h("p", {}, `Already on the list: ${scan.known.join(", ")}.`) : null,
+      ...scan.asNeeded.map((m) => h("p", {}, `${m.name} ${m.dose} is taken only when needed, so it has no reminder times. `,
+        h("button", { class: "btn small", type: "button", onclick: () => {
+          addMedicine(m, ["08:00"]);
+          scan.asNeeded = scan.asNeeded.filter((x) => x !== m); scan.added += 1;
+          changed(); render(); focusLast("#medicines .item.open input");
+        } }, "Add it with a daily time"))));
+  }
+  function findingsPanel() {
+    if (!findings) return null;
+    if (findings.busy) return h("div", { class: "panel busy", role: "status" }, h("span", { class: "spin" }), `Checking ${findings.title} against the FDA's medicine labels…`);
+    const r = findings.result;
+    if (!r.interactions.length)
+      return h("div", { class: "panel", role: "status" }, h("h3", {}, `No interactions found for ${findings.title}`),
+        h("p", {}, "The FDA labels don't mention a problem with the other medicines. It's still worth asking the pharmacist."),
+        r.not_found.length ? h("p", {}, `Not in the FDA labels: ${r.not_found.join(", ")}.`) : null);
+    return h("div", { class: "panel", role: "alert" },
+      h("h3", {}, `Check with the pharmacist or doctor: ${r.interactions.length} possible interaction${r.interactions.length > 1 ? "s" : ""}`),
+      h("p", {}, "From the FDA's drug labels. It's also on the dashboard."), interactionList(r));
+  }
+  async function checkMedicines(names) {
+    findings = { busy: true, title: names.join(", ") };
+    render();
+    try {
+      findings = { title: names.join(", "), result: await call("POST", "/api/medications/interactions", { medicines: names }) };
+    } catch (e) {
+      findings = null;
+      toast(`Couldn't check interactions: ${e.message}`);
+    }
+    render();
+  }
+
+  async function shrink(file) {  // phone photos are huge: 1600 px is plenty to read a label, and uploads fast
+    try {
+      const img = await createImageBitmap(file);
+      const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = Object.assign(document.createElement("canvas"), { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      return await new Promise((done) => c.toBlob(done, "image/jpeg", 0.85));
+    } catch {
+      return file;  // the browser can't decode it: let the server say what's wrong
+    }
+  }
+  async function scanPhoto(file) {
+    if (!file) return;
+    Object.assign(scan, { busy: true, error: "", notes: "", added: 0 });
+    render();
+    document.getElementById("medicines").scrollIntoView({ behavior: "smooth", block: "start" });
+    try {
+      const photo = await shrink(file);
+      const r = await fetch("/api/medications/scan", { method: "POST", body: photo,
+        headers: { ...(key ? { "X-Dashboard-Key": key } : {}), "Content-Type": photo.type || file.type || "image/jpeg" } });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      const have = new Set(state.medications.map((m) => base(m.name)));
+      const known = [], asNeeded = [];
+      let added = 0;
+      for (const m of data.medicines) {
+        if (have.has(base(m.name))) known.push(m.name);       // scanned twice, or already set up
+        else if (!m.times.length) asNeeded.push(m);           // "as needed": no daily reminder unless they want one
+        else { addMedicine(m, m.times); have.add(base(m.name)); added += 1; }
+      }
+      Object.assign(scan, { busy: false, added, known, asNeeded, notes: data.notes || "" });
+      findings = data.interactions && data.interactions.interactions.length ? { title: data.medicines.map((m) => m.name).join(", "), result: data.interactions } : null;
+      changed();
+    } catch (e) {
+      Object.assign(scan, { busy: false, error: e.message });
+    }
+    render();
+  }
+
   function render() {
     const p = state.profile;
     uid = 0;
@@ -552,7 +661,15 @@
           field("What to call them", p, "preferred_name", { required: true, err: "p.preferred_name", placeholder: "first name or nickname" }),
           field("Pharmacy", p, "pharmacy_name", { placeholder: "where refills are ordered" }),
           field("Emergency number", p, "emergency_number", { required: true, inputmode: "numeric", err: "p.emergency_number",
-            hint: "What Kinvesper tells them to call in an emergency.", extra: emergency }))]),
+            hint: "What Kinvesper tells them to call in an emergency.", extra: emergency }),
+          field("Daily “I'm okay” check-in", p, "checkin_time", { type: "time", err: "p.checkin_time",
+            hint: p.checkin_time
+              ? `The Echo asks ${p.preferred_name || "them"} to say they're okay at ${clock12(p.checkin_time)}. If nothing's heard within ${state.checkin_grace_min} minutes, ${p.caregiver_name || "the caregiver"} gets a text.`
+              : "Off. Turn it on so someone notices if a day goes by without a word.",
+            extra: h("div", { class: "presets", role: "group", "aria-label": "Check-in" },
+              ...[["09:00", "9 AM"], ["10:00", "10 AM"], ["11:00", "11 AM"], ["", "Off"]].map(([t, label]) => h("button", {
+                class: "preset", type: "button", "aria-pressed": String((p.checkin_time || "") === t),
+                onclick: () => { p.checkin_time = t; changed(); render(); } }, label))) }))]),
       section("caregiver", "Caregiver", "Suspicious calls, emergencies, missed doses and messages go to this phone and email.", [
         h("div", { class: "grid" },
           field("Name", p, "caregiver_name", { required: true, err: "p.caregiver_name" }),
@@ -561,6 +678,10 @@
           field("Email", p, "caregiver_email", { type: "email", err: "p.caregiver_email", placeholder: "name@example.com", hint: "Gets alerts and the weekly report.", autocomplete: "email" })),
         p.caregiver_email && snapshot() === saved ? note(tone, text) : null,
         p.caregiver_phone ? note("muted", "Texts from a new AWS account only reach numbers verified in the SNS SMS sandbox; email always works.") : null,
+        p.caregiver_phone ? (state.calls
+          ? note("good", `Urgent alerts also ring this phone: right away for an emergency, and after a few minutes for anything urgent nobody has acknowledged.`)
+          : note("muted", "Phone calls for urgent alerts aren't switched on for this server yet (it needs a calling number). Texts and email still go out."))
+          : null,
         h("div", { class: "actions-row" },
           h("button", { class: "btn", type: "button", onclick: (e) => run(e, "/api/settings/test-alert", "Sending…",
             (r) => r.sent ? "Test alert sent. Check the phone and inbox." : "Nothing was sent: there's no phone or email to send to here.") }, "Send a test alert"),
@@ -581,11 +702,17 @@
           h("button", { class: "preset", type: "button", onclick: () => { state.contacts.push({ name: "", relation: "", phone: "" }); changed(); render(); focusLast("#contacts .item input"); } }, "+ Someone else"))]),
       section("medicines", "Medicines", "Kinvesper reminds, logs doses and orders refills from this list. Click one to edit it.", [
         errors.meds ? h("p", { class: "error-text" }, errors.meds) : null,
+        scanPanel(), findingsPanel(),
         h("div", { class: "items" }, state.medications.length ? state.medications.map(medicine) : h("p", { class: "empty" }, "No medicines yet.")),
-        h("div", { class: "actions-row" }, h("button", { class: "btn", type: "button", onclick: () => {
-          state.medications.push({ name: "", dose: "", times: ["08:00"], pills_remaining: 30, purpose: "", instructions: "" });
-          open.add(`m${state.medications.length - 1}`); changed(); render(); focusLast("#medicines .item.open input");
-        } }, "+ Add a medicine"))]),
+        h("div", { class: "actions-row" },
+          state.scan ? h("button", { class: "btn primary", type: "button", onclick: () => $("photo").click(), disabled: scan.busy ? "" : null },
+            h("span", { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>' }),
+            "Scan a prescription") : null,
+          h("button", { class: "btn", type: "button", onclick: () => {
+            state.medications.push({ name: "", dose: "", times: ["08:00"], pills_remaining: 30, purpose: "", instructions: "" });
+            open.add(`m${state.medications.length - 1}`); changed(); render(); focusLast("#medicines .item.open input");
+          } }, "+ Add a medicine"),
+          state.scan ? h("span", { class: "hint" }, "Photograph a prescription or pill box: Claude reads it, you check it.") : null)]),
     ].filter(Boolean));
     window.scrollTo({ top: scrollY });
     renderNav();
@@ -638,8 +765,10 @@
         medications: state.medications.map((m) => ({ ...m, pills_remaining: Number(m.pills_remaining) })), contacts: state.contacts };
       state = await call("PUT", "/api/settings", body);
       saved = snapshot(); open.clear();
+      Object.assign(scan, { added: 0, notes: "", error: "", known: [], asNeeded: [] });
       render(); changed();
       toast(state.email_status === "pending" ? "Saved. Ask the caregiver to confirm the alert email." : "Saved");
+      if (state.added && state.added.length) checkMedicines(state.added);  // new medicines: check them against the rest
     } catch (e) {
       say(e.message, true);
     } finally {
@@ -648,6 +777,7 @@
   }
 
   $("save").onclick = saveAll;
+  $("photo").addEventListener("change", (e) => { scanPhoto(e.target.files[0]); e.target.value = ""; });
   function restore() {
     const s = JSON.parse(saved);
     state.profile = s.p; state.medications = s.m; state.contacts = s.c;

@@ -298,6 +298,8 @@
   .msg.bot .bubble { background: var(--bot); box-shadow: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px var(--well-edge) inset, 0 8px 20px -14px rgba(0,0,0,.3); border-bottom-left-radius: 6px; }
   .msg.update .bubble { background: var(--brand-soft); }
   .msg.confirm .bubble, .msg.ring .bubble { background: var(--warn-soft); }
+  .msg.ring.update .bubble { background: var(--brand-soft); border-color: var(--brand); }  /* a message from the family */
+  .msg.ring.update .tag { color: var(--brand); }
   .used { border: none; background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; }
   .via pre { border: none; background: var(--well); border-radius: 14px; }
   .quick button { border-radius: 999px; box-shadow: 0 1px 0 rgba(255,255,255,.35) inset, 0 8px 18px -8px var(--brand); }
@@ -389,6 +391,8 @@
     daily_check_in: "Recorded how they feel", notify_caregiver: () => `Messaged ${caregiver}`, emergency_help: "Sent an urgent alert",
     get_care_summary: "Summarised the week", request_pharmacy_refill: "Ordered a refill", set_reminder: "Set a reminder",
     list_reminders: "Checked reminders", cancel_reminder: "Cancelled a reminder",
+    check_medicine_interactions: "Checked the FDA labels for interactions", get_family_messages: "Read the family's messages",
+    start_conversation: "Started a chat", save_memory: () => `Saved a memory for ${caregiver}`,
   };
   const did = (name) => { const d = DID[name]; return typeof d === "function" ? d() : d || name; };
   const ICON = {
@@ -631,10 +635,10 @@
     const [first, last] = [meds[0], meds[meds.length - 1]];  // from the household's medicine list (Settings)
     const groups = [
       ["pill", "Medicines", ["What pills do I need today?", first && `Did I take my ${first}?`,
-        first && `I just took my ${first}.`, last && `Can you order more of my ${last}?`]],
+        first && `I just took my ${first}.`, last && `Can you order more of my ${last}?`, "Can I take ibuprofen with my pills?"]],
       ["shield", "Scams and safety", ["A man called saying my grandson is in jail and needs gift cards for bail.",
         "Someone from my bank called asking for my OTP.", "I'm feeling a bit dizzy today."]],
-      ["family", "Family", [`Tell ${caregiver} I'm going to the doctor at 3.`, "How was my week?"]],
+      ["family", "Family and company", [`Tell ${caregiver} I'm going to the doctor at 3.`, "Any messages for me?", "Let's chat.", "I'm fine, thank you."]],
       ["bell", "Reminders", [`Remind me to call ${caregiver} at 5 PM.`, "Set an alarm for my doctor's appointment tomorrow at 10 AM.",
         "What reminders do I have?"]],
       smart && ["spark", "Anything else", ["What's the weather today?", "Tell me a joke.", "What time is it?"]],
@@ -695,8 +699,9 @@
 
   function ring(a) {
     const important = a.ring === "alarm";
-    const msg = addMessage("bot ring", a.text, { tag: important ? "Alarm" : "Reminder" });
-    if (document.hidden) document.title = `⏰ ${important ? "Alarm" : "Reminder"} · ${TITLE}`;
+    const tag = important ? "Alarm" : a.ring === "message" ? `Message from ${caregiver}` : "Reminder";
+    const msg = addMessage(`bot ring${a.ring === "message" ? " update" : ""}`, a.text, { tag });
+    if (document.hidden) document.title = `${a.ring === "message" ? "✉️" : "⏰"} ${tag} · ${TITLE}`;
     // Browsers won't play sound on a page nobody has clicked yet: offer a button to hear it.
     if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
       const row = el("div", "quick");

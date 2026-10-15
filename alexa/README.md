@@ -116,6 +116,12 @@ Alexa app and the developer console's simulator:
   The bridge then puts them on the Echo (asking for the reminders and timers permissions by voice
   the first time). An important alarm gets a heads-up reminder 30 minutes before and, when it's
   due within 2 hours, a timer that rings until "Alexa, stop".
+- **Echo Show:** with the APL interface on, every reply also shows today's medicines in large print,
+  with a "Taken" button (an `Alexa.Presentation.APL.UserEvent`) for each dose that's due. Turn on
+  **Device Display** in the console's Test tab to see it there.
+- **Family messages and the daily check-in:** messages typed in the dashboard are read out when the
+  skill opens. With reminders allowed, the Echo also asks "please let me know you're okay" daily at
+  the check-in time from Settings.
 - **Hindi (hi-IN):** the same intents with Hindi samples. The bridge speaks Hindi for its own
   phrases, and Claude answers in Hindi (tool results are translated, so care answers take one more
   model call).
@@ -127,6 +133,8 @@ sub-domain of a domain that has a wildcard certificate": App Runner serves `*.<r
 and with the "trusted certificate" option Alexa fails the TLS check and says "unable to reach the requested skill"). Then:
 
 1. **Permissions** (left menu, under Tools): turn on **Reminders** and **Timers**.
+1. **Interfaces** (left menu, under Build): turn on **Alexa Presentation Language** (tick the Echo
+   Show hub sizes) and save, then **Build skill**. Without it, Echo Show devices get voice only.
 2. **Hindi:** in the language dropdown at the top left, **Language settings → Add new language →
    Hindi (IN)**, save, then switch to Hindi, paste `interactionModels/custom/hi-IN.json` into its
    JSON Editor, build, and set the same endpoint. Test it by switching the Test tab to Hindi.

@@ -32,6 +32,9 @@ class Profile(BaseModel):
     backup_email: str = ""
     pharmacy_name: str = "Main Street Pharmacy"
     emergency_number: str = "911"  # what Kinvesper tells them to call: 112 in India and the EU, 999 in the UK
+    # Daily "I'm okay" check-in: the Echo asks at this time (24h HH:MM, "" = off), and the caregiver is told
+    # when nothing has been heard from them by CHECKIN_GRACE_MIN later.
+    checkin_time: str = "10:00"
     last_activity: str | None = None  # ISO timestamp of the last voice interaction
 
 
@@ -54,6 +57,7 @@ class Medication(BaseModel):
     pills_remaining: int = 30
     pills_per_dose: int = 1
     active: bool = True
+    added_at: str = ""  # ISO timestamp; doses before it were never due (empty: always on the list)
 
 
 class DoseLog(BaseModel):
@@ -67,7 +71,8 @@ class DoseLog(BaseModel):
 
 AlertLevel = Literal["info", "warning", "urgent"]
 AlertKind = Literal[
-    "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock", "test", "report", "reminder"
+    "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock", "test", "report",
+    "reminder", "interaction", "pattern", "no_checkin",
 ]
 
 
@@ -82,6 +87,7 @@ class Alert(BaseModel):
     notified: bool = False
     acknowledged: bool = False
     escalated_at: str | None = None  # when it went to the backup contact, unacknowledged
+    called_at: str | None = None  # when the caregiver's phone was rung about it (urgent alerts)
 
 
 RefillStatus = Literal["requested", "contacting_pharmacy", "verifying", "approved", "ready", "failed"]
@@ -97,6 +103,25 @@ class Refill(BaseModel):
     ready_by: str | None = None
     created_at: str
     updated_at: str
+
+
+class FamilyMessage(BaseModel):
+    """A message the family typed in the dashboard, read out on the Echo the next time it's used."""
+
+    id: str = Field(default_factory=lambda: new_id("msg"))
+    sender: str
+    text: str
+    created_at: str
+    heard_at: str | None = None
+
+
+class Memory(BaseModel):
+    """Something the person shared about their life in a companionship chat, kept for the family."""
+
+    id: str = Field(default_factory=lambda: new_id("memory"))
+    at: str
+    topic: str = ""
+    text: str
 
 
 class CheckIn(BaseModel):
@@ -218,3 +243,48 @@ class CareSummary(BaseModel):
     open_alerts: int
     recent_moods: list[str]
     narrative: str
+
+
+class Interaction(BaseModel):
+    medicines: list[str] = Field(description="The two medicines that interact")
+    severity: Literal["serious", "moderate", "minor"]
+    explanation: str = Field(description="What could happen, in plain words")
+
+
+class InteractionResult(BaseModel):
+    checked: list[str] = Field(description="Medicines looked up")
+    interactions: list[Interaction] = Field(default_factory=list)
+    not_found: list[str] = Field(default_factory=list, description="Medicines with no FDA label found")
+    message: str
+
+
+class ScannedMedicine(BaseModel):
+    name: str
+    dose: str = ""
+    purpose: str = ""
+    times: list[str] = Field(default_factory=list, description="Daily times in 24h HH:MM")
+    instructions: str = ""
+    pills_remaining: int | None = None
+
+
+class ScanResult(BaseModel):
+    medicines: list[ScannedMedicine]
+    notes: str = ""
+    interactions: InteractionResult | None = None
+
+
+class MessagesResult(BaseModel):
+    messages: list[FamilyMessage] = Field(default_factory=list)
+    message: str
+
+
+class MemoryResult(BaseModel):
+    saved: bool
+    memory: Memory | None = None
+    message: str
+
+
+class ConversationStarter(BaseModel):
+    topic: str
+    question: str
+    message: str

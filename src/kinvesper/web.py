@@ -27,6 +27,7 @@ from starlette.routing import Route
 
 from . import llm, reminders, speech
 from .config import now, settings
+from .i18n import t
 from .service import CareService
 from .voice import Announcement, VoiceSession, VoiceSessions
 
@@ -63,6 +64,10 @@ def due_rings(service: CareService, session: VoiceSession) -> list[Announcement]
         if key not in session.rung:
             session.rung.add(key)
             out.append(Announcement(text=text, ring="alarm" if alarm else "reminder"))
+    if service.family_messages(unheard_only=True):  # typed in the dashboard: the "Echo" reads them out
+        for m in service.take_family_messages().messages:
+            out.append(Announcement(text=t(locale, "family_message", name=session.patient, sender=m.sender, text=m.text),
+                                    ring="message"))
     return out
 
 

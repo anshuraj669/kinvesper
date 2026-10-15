@@ -1,5 +1,8 @@
 """Caregiver notifications over Amazon SNS, to the contact saved in the profile. Falls back to logging.
 
+- Urgent alerts also ring the caregiver's phone: a spoken call (AWS End User Messaging SMS and Voice,
+  SendVoiceMessage) from the voice-capable number in VOICE_CALL_FROM. Without one, no calls.
+
 - Phone: a text straight to the number (sns.publish PhoneNumber=...). A new AWS account's SMS sandbox
   only delivers to verified numbers.
 - Email: SNS emails a topic's confirmed subscribers. Saving an email in the dashboard subscribes it to
@@ -15,6 +18,7 @@ import json
 import logging
 import re
 from typing import Literal
+from xml.sax.saxutils import escape
 
 from .config import settings
 
@@ -104,3 +108,29 @@ async def email_status(email: str) -> EmailStatus:
     if any(s["SubscriptionArn"].startswith("arn:") for s in mine):
         return "confirmed"
     return "pending" if mine else "not_subscribed"
+
+
+def _call(phone: str, text: str) -> None:
+    import boto3
+
+    ssml = f'<speak>{escape(text)}<break time="1s"/>Again: {escape(text)}</speak>'  # said twice: people miss the start
+    boto3.client("pinpoint-sms-voice-v2", region_name=settings.aws_region).send_voice_message(
+        DestinationPhoneNumber=phone, OriginationIdentity=settings.voice_call_from,
+        MessageBody=ssml, MessageBodyTextType="SSML", VoiceId="JOANNA")
+
+
+def calls_enabled() -> bool:
+    return bool(settings.voice_call_from)
+
+
+async def call(phone: str, text: str) -> bool:
+    """Ring `phone` and read `text` aloud. Returns True when the call was placed."""
+    if not phone or not calls_enabled():
+        log.info("[call skipped: %s] %s", "no number to call" if not phone else "VOICE_CALL_FROM not set", text)
+        return False
+    try:
+        await asyncio.to_thread(_call, phone, text)
+        return True
+    except Exception as e:  # e.g. a destination not verified in the sandbox: the text and email still went
+        log.warning("Phone call to %s failed: %s", phone[-4:], e)
+        return False

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import base64
 import difflib
+import json
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 
 import anyio
 
-from . import contacts, llm, notify, scam, when
+from . import contacts, interactions, llm, notify, scam, when
 from .config import now, settings
 from .models import (
     Alert,
@@ -19,10 +21,16 @@ from .models import (
     CheckIn,
     CheckInResult,
     ContactResult,
+    ConversationStarter,
     DayAdherence,
     DoseLog,
+    FamilyMessage,
+    InteractionResult,
     LogDoseResult,
     Medication,
+    Memory,
+    MemoryResult,
+    MessagesResult,
     NotifyResult,
     Profile,
     Refill,
@@ -30,6 +38,8 @@ from .models import (
     Reminder,
     ReminderResult,
     ScamAssessment,
+    ScannedMedicine,
+    ScanResult,
     ScheduleItem,
     TrustedContact,
     ScheduleResult,
@@ -90,8 +100,61 @@ def clean_message(text: str, caregiver: str) -> str:
 TIME = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 PROFILE_FIELDS = ("patient_name", "preferred_name", "caregiver_name", "caregiver_relation",
                   "caregiver_phone", "caregiver_email", "backup_name", "backup_phone", "backup_email", "pharmacy_name",
-                  "emergency_number")
+                  "emergency_number", "checkin_time")
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
+# Companionship: gentle questions about their life, one at a time. What they share is kept for the family.
+STARTERS = [
+    ("childhood", "Where did you grow up, and what was your home like?"),
+    ("food", "What's a dish from your childhood that you still remember the taste of?"),
+    ("work", "What work did you do, and what did you enjoy most about it?"),
+    ("festivals", "How did your family celebrate festivals or holidays when you were young?"),
+    ("music", "What songs did you love when you were young?"),
+    ("friends", "Who was your best friend growing up, and what did you get up to together?"),
+    ("family", "What's a favourite memory of your children when they were small?"),
+    ("travel", "What's the most beautiful place you've ever been?"),
+    ("proud", "What are you most proud of in your life?"),
+    ("advice", "What advice would you give your grandchildren?"),
+]
+REPEAT_TOPICS = {  # questions asked again and again in one day, a gentle early sign worth a look
+    "schedule": "asked about the medicine schedule",
+    "reminders": "asked which reminders are set",
+    "double_dose": "tried to log a dose that was already taken",
+}
+SCAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "medicines": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"}, "dose": {"type": "string"}, "purpose": {"type": "string"},
+                "times": {"type": "array", "items": {"type": "string"}}, "instructions": {"type": "string"},
+                "pills_remaining": {"type": "integer"},
+            },
+            "required": ["name", "dose", "purpose", "times", "instructions", "pills_remaining"],
+            "additionalProperties": False}},
+        "notes": {"type": "string"},
+    },
+    "required": ["medicines", "notes"], "additionalProperties": False,
+}
+SCAN_SYSTEM = """You read a photo of a prescription, a pharmacy label or a medicine box for a family setting up their parent's
+medicine reminders. List every medicine you can read. For each:
+- name: the medicine name as printed (brand or generic), without the strength
+- dose: the strength per dose, e.g. "10 mg", "500 mg", "1 tablet"
+- purpose: what it's for in two or three plain words if printed or well known (e.g. "blood pressure"), else ""
+- times: daily times in 24-hour HH:MM. Once daily or "OD" = ["08:00"] (morning) or ["21:00"] (bedtime/night,
+  "HS"); twice ("BD", "BID") = ["08:00", "20:00"]; three times ("TDS", "TID") = ["08:00", "14:00", "20:00"];
+  four times ("QID") = ["08:00", "12:00", "16:00", "20:00"]; before breakfast = ["07:00"]; as needed ("SOS", "PRN") = []
+- instructions: short directions printed, e.g. "take with food" (else "")
+- pills_remaining: the quantity dispensed if printed, else 0
+In notes, say in one or two plain sentences anything to double-check (hard-to-read parts, "as needed" medicines,
+a course with an end date). If the photo isn't a prescription or medicine label, return no medicines and say so in
+notes. Never guess a medicine you can't read."""
+ASK_SYSTEM = """You are Kinvesper, answering a family caregiver's questions about the parent they care for, from the care data
+below. Answer in two to five plain sentences, warmly and factually, with numbers where they help. Use only the
+data: if it doesn't cover the question (Kinvesper doesn't track sleep, meals or steps, for example), say so and
+mention what it does track. Never diagnose; for health worries suggest talking to the doctor. Plain text, no
+markdown. Say dates as weekdays ("on Tuesday") when they're within the week."""
 
 
 class SettingsError(ValueError):
@@ -150,6 +213,21 @@ class CareService:
     def add_medication(self, med: Medication) -> Medication:
         self.store.save("med", med)
         return med
+
+    def _monitored_since(self) -> str | None:
+        """The first day Kinvesper was in use (its first dose, check-in or conversation). Days before it
+        aren't counted as missed doses."""
+        dates = [d.date for d in self.store.load_all("dose", DoseLog)] + [c.at[:10] for c in self.store.load_all("checkin", CheckIn)]
+        if last := self.profile().last_activity:
+            dates.append(last[:10])
+        return min(dates) if dates else None
+
+    @staticmethod
+    def _expected(m: Medication, slot: datetime, since: str | None) -> bool:
+        """Was this dose due: on a monitored day, and after the medicine was added to the list?"""
+        if since and slot.date().isoformat() < since:
+            return False
+        return not m.added_at or slot >= datetime.fromisoformat(m.added_at)
 
     # ---------- one-off reminders and alarms ----------
 
@@ -238,7 +316,10 @@ class CareService:
             "backup_email_status": await notify.email_status(p.backup_email),
             "escalate_after_min": settings.escalate_after_min,
             "low_stock_threshold": settings.low_stock_threshold,
+            "checkin_grace_min": settings.checkin_grace_min,
             "sms": bool(p.caregiver_phone),
+            "calls": notify.calls_enabled(),
+            "scan": llm.enabled(),
         }
 
     async def update_settings(self, profile: dict, medications: list[dict], trusted: list[dict] | None = None) -> dict:
@@ -255,6 +336,10 @@ class CareService:
                 raise SettingsError(f"The {who}'s phone must include the country code, like +15551234567.")
             if fields[f"{who}_email"] and not notify.EMAIL.match(fields[f"{who}_email"]):
                 raise SettingsError(f"The {who}'s email address doesn't look right.")
+        if fields["checkin_time"]:
+            fields["checkin_time"] = fields["checkin_time"].zfill(5)
+            if not TIME.match(fields["checkin_time"]):
+                raise SettingsError("The daily check-in time must be 24-hour HH:MM, like 10:00.")
         if not re.fullmatch(r"\d{2,6}", fields["emergency_number"]):
             raise SettingsError("The emergency number should be the short local number, like 112, 911 or 999.")
         if (fields["backup_phone"] or fields["backup_email"]) and not fields["backup_name"]:
@@ -283,7 +368,8 @@ class CareService:
                 self.store.save("contact", c)
         await notify.change_email(old.caregiver_email, fields["caregiver_email"])
         await notify.change_email(old.backup_email, fields["backup_email"], audience="backup")
-        return await self.settings_view()
+        before = {interactions.base_name(m.name) for m in current.values() if m.active}
+        return {**await self.settings_view(), "added": [m.name for m in meds if interactions.base_name(m.name) not in before]}
 
     async def send_test_alert(self) -> Alert:
         p = self.profile()
@@ -327,7 +413,7 @@ class CareService:
         if not values["dose"]:
             raise SettingsError(f"{name}: add the dose, like 10 mg.")
         existing = current.get(str(data.get("id") or ""))
-        return existing.model_copy(update=values) if existing else Medication(**values)
+        return existing.model_copy(update=values) if existing else Medication(**values, added_at=now().isoformat())
 
     # ---------- doses & schedule ----------
 
@@ -355,6 +441,8 @@ class CareService:
         for m in meds:
             for t in m.times:
                 log = logs.get((m.id, t))
+                if not log and not self._expected(m, _at(current, t), None):
+                    continue  # added to the list after this time today: first due tomorrow
                 items.append(
                     ScheduleItem(
                         medication=m.name,
@@ -553,6 +641,7 @@ class CareService:
     async def emergency(self, description: str) -> NotifyResult:
         p = self.profile()
         alert = await self.raise_alert("urgent", "emergency", f"EMERGENCY: {p.preferred_name} needs help", description, sms=True)
+        await self._ring(alert)  # an emergency doesn't wait: the caregiver's phone rings now
         return NotifyResult(
             sent=True,
             alert_id=alert.id,
@@ -657,7 +746,8 @@ class CareService:
         logs = self._logs_for(date)
         for m in self.medications():
             for t in m.times:
-                if (m.id, t) not in logs and current > _at(current, t) + timedelta(minutes=settings.missed_dose_grace_min):
+                if ((m.id, t) not in logs and current > _at(current, t) + timedelta(minutes=settings.missed_dose_grace_min)
+                        and self._expected(m, _at(current, t), None)):
                     await alert(
                         "warning", "missed_dose", f"{p.preferred_name} missed the {spoken_time(t)} {m.name}",
                         f"{m.name} {m.dose} was due at {spoken_time(t)} and hasn't been logged.",
@@ -681,6 +771,19 @@ class CareService:
                     dedupe_key=f"inactivity:{p.last_activity}",  # once per quiet spell
                 )
 
+        if p.checkin_time:
+            asked = _at(current, p.checkin_time)
+            heard = p.last_activity and datetime.fromisoformat(p.last_activity) >= asked - timedelta(hours=4)
+            if current >= asked + timedelta(minutes=settings.checkin_grace_min) and not heard:
+                last = f"since {_spoken_dt(p.last_activity)} {'today' if p.last_activity[:10] == date else 'yesterday' if p.last_activity[:10] == (current - timedelta(days=1)).date().isoformat() else 'some days ago'}" if p.last_activity else "yet"
+                await alert(
+                    "warning", "no_checkin", f"No check-in from {p.preferred_name} today",
+                    f"Kinvesper asked {p.preferred_name} at {spoken_time(p.checkin_time)} to say they're okay and hasn't "
+                    f"heard from them {last}. Please give {p.preferred_name} a call.",
+                    dedupe_key=f"nocheckin:{date}", sms=True,
+                )
+
+        await self._call_unanswered(current)
         await self._escalate(current)
         await self._due_reminders(current)
         week = current.isocalendar()
@@ -705,8 +808,32 @@ class CareService:
                 f"{p.caregiver_name} for {minutes} minutes:\n\n{a.title}\n{a.detail}\n\n"
                 f"Please check on {p.preferred_name} or reach {p.caregiver_name}.",
                 phone=p.backup_phone, audience="backup")
+            await notify.call(p.backup_phone, self._call_text(a, p, f"{p.caregiver_name} hasn't answered it."))
             a.escalated_at = current.isoformat()
             self.store.save("alert", a)
+
+    @staticmethod
+    def _call_text(a: Alert, p: Profile, extra: str = "") -> str:
+        detail = a.detail.split("\n")[0].strip()
+        return (f"This is Kinvesper, with an urgent alert about {p.patient_name}. {a.title.rstrip('.')}. "
+                f"{detail + '. ' if detail else ''}{extra + ' ' if extra else ''}Please check on {p.preferred_name} now, "
+                "then acknowledge the alert in the Kinvesper dashboard.")
+
+    async def _ring(self, a: Alert) -> None:
+        """Call the caregiver about an urgent alert, once."""
+        p = self.profile()
+        if a.called_at or not p.caregiver_phone:
+            return
+        if await notify.call(p.caregiver_phone, self._call_text(a, p)):
+            a.called_at = now().isoformat()
+            self.store.save("alert", a)
+
+    async def _call_unanswered(self, current: datetime) -> None:
+        """A text is easy to miss: urgent alerts still open after CALL_AFTER_MIN minutes ring the caregiver's phone."""
+        cutoff = (current - timedelta(minutes=settings.call_after_min)).isoformat()
+        for a in self.alerts(include_acknowledged=False):
+            if a.level == "urgent" and not a.called_at and a.created_at <= cutoff:
+                await self._ring(a)
 
     async def send_weekly_report(self) -> Alert:
         """Email the caregiver this week's report (adherence, missed doses, moods, suspicious calls)."""
@@ -733,6 +860,258 @@ class CareService:
         alert.acknowledged = True  # informational: nothing to act on
         self.store.save("alert", alert)
         return alert
+
+    # ---------- medicine interactions ----------
+
+    async def check_interactions(self, medicine: str, with_medicine: str = "") -> InteractionResult:
+        """Voice: "can I take ibuprofen with my pills?" Checks against all their medicines (or just `with_medicine`)
+        and tells the family when there's something to watch."""
+        medicine = medicine.strip()
+        others = [with_medicine.strip()] if with_medicine.strip() else [m.name for m in self.medications()]
+        others = [o for o in others if interactions.base_name(o) != interactions.base_name(medicine)]
+        result = await interactions.check([medicine], others)
+        if result.interactions:
+            p, worst = self.profile(), result.interactions[0]
+            await self.raise_alert(
+                "warning" if worst.severity == "serious" else "info", "interaction",
+                f"{p.preferred_name} asked about taking {medicine}",
+                "\n".join(f"{' + '.join(i.medicines)} ({i.severity}): {i.explanation}" for i in result.interactions),
+                dedupe_key=f"interaction:{now().date().isoformat()}:{interactions.base_name(medicine)}", sms=False)
+        return result
+
+    async def check_new_medicines(self, names: list[str]) -> InteractionResult:
+        """Settings: the medicines just added, against everything else they take. Findings go on the dashboard."""
+        names = [n.strip() for n in names if n.strip()]
+        new = {interactions.base_name(n) for n in names}
+        others = [m.name for m in self.medications() if interactions.base_name(m.name) not in new]
+        result = await interactions.check(names, others)
+        for i in result.interactions:
+            await self.raise_alert(
+                "warning" if i.severity == "serious" else "info", "interaction",
+                f"Possible interaction: {' and '.join(i.medicines)}", f"{i.explanation} Please check with the pharmacist or doctor.",
+                dedupe_key=f"interaction:{'+'.join(sorted(map(interactions.base_name, i.medicines)))}", sms=False)
+        return result
+
+    # ---------- prescription photos ----------
+
+    async def scan_prescription(self, image: bytes, media_type: str) -> ScanResult:
+        """Read a photo of a prescription or medicine label into medicines for the caregiver to review (nothing is
+        saved here). Raises SettingsError when it can't be read."""
+        if not llm.enabled():
+            raise SettingsError("Reading photos needs Claude, which isn't set up on this server.")
+        if media_type not in IMAGE_TYPES:
+            raise SettingsError("Send a JPEG, PNG, GIF or WebP photo.")
+        content = [
+            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(image).decode()}},
+            {"type": "text", "text": "Read the medicines in this photo."},
+        ]
+        data = await llm.structured(SCAN_SYSTEM, content, SCAN_SCHEMA, max_tokens=2048)
+        if data is None:
+            raise SettingsError("Sorry, I couldn't read that photo. Try again with the label flat, in good light.")
+        meds = []
+        for m in data.get("medicines", []):
+            times = sorted({t.strip().zfill(5) for t in m.get("times", []) if TIME.match(t.strip().zfill(5))})
+            meds.append(ScannedMedicine(
+                name=m.get("name", "").strip(), dose=m.get("dose", "").strip(), purpose=m.get("purpose", "").strip(),
+                times=times, instructions=m.get("instructions", "").strip(),
+                pills_remaining=m.get("pills_remaining") or None))
+        meds = [m for m in meds if m.name]
+        result = ScanResult(medicines=meds, notes=data.get("notes", "").strip())
+        if meds:
+            current = {interactions.base_name(m.name) for m in self.medications()}
+            new = [m.name for m in meds if interactions.base_name(m.name) not in current]
+            if new:
+                result.interactions = await interactions.check(new, [m.name for m in self.medications()])
+        return result
+
+    # ---------- ask Kinvesper (caregiver) ----------
+
+    def _care_snapshot(self, days: int = 14) -> str:
+        """Everything Kinvesper knows that a caregiver might ask about, as compact text for Claude."""
+        current, p = now(), self.profile()
+        cutoff = (current - timedelta(days=days)).isoformat()
+        meds = self.medications()
+        logs = [d for d in self.store.load_all("dose", DoseLog) if d.taken_at >= cutoff]
+        names = {m.id: m.name for m in self.store.load_all("med", Medication)}
+        lines = [
+            f"Now: {current.strftime('%A %d %B %Y, %H:%M')} ({getattr(settings.tz, 'key', 'local time')}).",
+            f"Person: {p.patient_name} (called {p.preferred_name}). Caregiver: {p.caregiver_name} ({p.caregiver_relation}).",
+            f"Last talked to Kinvesper: {p.last_activity or 'never'}. Daily check-in time: {p.checkin_time or 'off'}.",
+            "Medicines: " + "; ".join(f"{m.name} {m.dose} at {', '.join(m.times)} for {m.purpose or '?'}"
+                                      f"{', ' + m.instructions if m.instructions else ''}, {m.pills_remaining} left" for m in meds),
+            "Adherence by day (taken/scheduled): " + ", ".join(f"{d.date} {d.taken}/{d.scheduled}" for d in self.adherence(days)),
+            "Missed doses: " + ("; ".join(self._missed_labels(days)) or "none"),
+            "Doses logged (time taken vs scheduled slot): " + "; ".join(
+                f"{d.date} {names.get(d.medication_id, '?')} slot {d.slot} taken {d.taken_at[11:16]}" for d in sorted(logs, key=lambda d: d.taken_at)[-60:]),
+            "Check-ins: " + ("; ".join(f"{c.at[:16]} mood {c.mood}{' - ' + c.notes if c.notes else ''}"
+                                      f"{' concerns: ' + ', '.join(c.concerns) if c.concerns else ''}" for c in self.checkins(days)) or "none"),
+            "Alerts: " + ("; ".join(f"{a.created_at[:16]} [{a.level}] {a.title}{' - ' + a.detail.splitlines()[0] if a.detail else ''}"
+                                    f"{' (acknowledged)' if a.acknowledged else ''}" for a in self.alerts() if a.created_at >= cutoff) or "none"),
+            "Upcoming reminders: " + ("; ".join(f"{r.at} {r.text}{' (important)' if r.important else ''}" for r in self.reminders()) or "none"),
+            "Refills: " + ("; ".join(f"{r.created_at[:10]} {r.medication_name}: {r.status_message}" for r in self.refills()[:5]) or "none"),
+            "Family messages: " + ("; ".join(f"{m.created_at[:16]} from {m.sender}: {m.text} ({'heard ' + m.heard_at[:16] if m.heard_at else 'not heard yet'})"
+                                             for m in self.family_messages()[:5]) or "none"),
+            "Memories shared: " + ("; ".join(f"{m.at[:10]} ({m.topic}) {m.text[:200]}" for m in self.memories()[:6]) or "none"),
+            "Repeated questions today: " + (", ".join(f"{REPEAT_TOPICS.get(k, k)} x{v}" for k, v in (self.store.get("asks", current.date().isoformat()) or {}).items()) or "none"),
+        ]
+        return "\n".join(lines)
+
+    async def ask(self, question: str, history: list[dict] | None = None) -> str:
+        """Answer a caregiver's question ("how has Mum been this week?") from the care data."""
+        if not llm.enabled():
+            return "Ask Kinvesper needs Claude, which isn't set up on this server. The cards on this page have the details."
+        messages = []
+        for turn in (history or [])[-4:]:
+            if turn.get("q") and turn.get("a"):
+                messages += [{"role": "user", "content": str(turn["q"])[:500]}, {"role": "assistant", "content": str(turn["a"])[:2000]}]
+        messages.append({"role": "user", "content": question[:500]})
+        system = [{"type": "text", "text": ASK_SYSTEM}, {"type": "text", "text": "Care data:\n" + self._care_snapshot()}]
+        try:
+            response = await llm.create_message(system=system, messages=messages, max_tokens=600)
+        except Exception as e:  # anthropic.APIError, network
+            return f"Sorry, I couldn't answer that just now ({type(e).__name__}). Please try again."
+        return llm.text_of(response) or "Sorry, I don't have an answer to that."
+
+    # ---------- family messages (dashboard -> Echo) ----------
+
+    def family_messages(self, unheard_only: bool = False) -> list[FamilyMessage]:
+        items = sorted(self.store.load_all("message", FamilyMessage), key=lambda m: m.created_at, reverse=True)
+        return [m for m in items if not m.heard_at] if unheard_only else items
+
+    def send_family_message(self, text: str) -> FamilyMessage:
+        text = text.strip()
+        if not text:
+            raise SettingsError("Write a message first.")
+        msg = FamilyMessage(sender=self.profile().caregiver_name, text=text[:500], created_at=now().isoformat())
+        self.store.save("message", msg)
+        return msg
+
+    def take_family_messages(self) -> MessagesResult:
+        """The messages not heard yet, read out now (and marked heard)."""
+        unheard = sorted(self.family_messages(unheard_only=True), key=lambda m: m.created_at)
+        p = self.profile()
+        if not unheard:
+            last = next(iter(self.family_messages()), None)
+            said = f" The last one, from {last.sender}, said: {last.text}" if last else ""
+            return MessagesResult(message=f"No new messages from {p.caregiver_name}.{said}")
+        stamp = now().isoformat()
+        for m in unheard:
+            m.heard_at = stamp
+            self.store.save("message", m)
+        if len(unheard) == 1:
+            m = unheard[0]
+            return MessagesResult(messages=unheard, message=f"You have a message from {m.sender}: {m.text}")
+        said = " Next: ".join(f"from {m.sender}: {m.text}" for m in unheard)
+        return MessagesResult(messages=unheard, message=f"You have {len(unheard)} messages. First, {said}")
+
+    # ---------- companionship ----------
+
+    def memories(self) -> list[Memory]:
+        return sorted(self.store.load_all("memory", Memory), key=lambda m: m.at, reverse=True)
+
+    def conversation_starter(self) -> ConversationStarter:
+        """A gentle question about their life, one they haven't answered yet."""
+        told = {m.topic for m in self.memories()}
+        fresh = [s for s in STARTERS if s[0] not in told] or STARTERS
+        topic, question = fresh[now().timetuple().tm_yday % len(fresh)]
+        name = self.profile().preferred_name
+        return ConversationStarter(topic=topic, question=question,
+                                   message=f"I'd love to hear about your life, {name}. {question}")
+
+    def save_memory(self, text: str, topic: str = "") -> MemoryResult:
+        text = text.strip()
+        if len(text) < 15:
+            return MemoryResult(saved=False, message="Tell me a little more about it.")
+        memory = Memory(at=now().isoformat(), topic=topic.strip().lower()[:40], text=text[:2000])
+        self.store.save("memory", memory)
+        p = self.profile()
+        return MemoryResult(saved=True, memory=memory,
+                            message=f"What a lovely memory. I've saved it so {p.caregiver_name} can read it too.")
+
+    # ---------- repeated questions ----------
+
+    async def note_repeat(self, topic: str) -> None:
+        """Count a question per day; when it keeps coming back, tell the family gently, once a day."""
+        date = now().date().isoformat()
+        counts = self.store.get("asks", date) or {}
+        counts[topic] = counts.get(topic, 0) + 1
+        self.store.put("asks", date, counts)
+        double = topic == "double_dose"
+        if counts[topic] != (2 if double else settings.repeat_threshold):
+            return
+        p = self.profile()
+        what = REPEAT_TOPICS.get(topic, topic)
+        detail = (f"Kinvesper told {p.preferred_name} not to take it again each time. You may want to check the pill box together."
+                  if double else
+                  f"Asking again and again can just be habit or worry, but if it's new for {p.preferred_name} it can be an early "
+                  "sign of memory trouble. You might give them a call, and mention it to their doctor if it keeps happening.")
+        await self.raise_alert("warning" if double else "info", "pattern",
+                               f"{p.preferred_name} {what} {counts[topic]} times today", detail,
+                               dedupe_key=f"pattern:{date}:{topic}", sms=double)
+
+    # ---------- doctor visit summary ----------
+
+    async def doctor_report(self, days: int = 30) -> dict:
+        """A one-page summary to take to the doctor: medicines and how reliably they're taken, missed doses by
+        time of day, mood, symptoms mentioned, falls and other alerts, and questions worth asking."""
+        current, p = now(), self.profile()
+        cutoff = (current - timedelta(days=days)).isoformat()
+        taken = {(d.date, d.medication_id, d.slot) for d in self.store.load_all("dose", DoseLog)}
+        meds, per_med, by_time = self.medications(), [], {}
+        since = self._monitored_since()
+        for m in meds:
+            due = got = 0
+            for back in range(days - 1, -1, -1):
+                day = current - timedelta(days=back)
+                for t in m.times:
+                    if current <= _at(day, t) + timedelta(minutes=settings.missed_dose_grace_min) or not self._expected(m, _at(day, t), since):
+                        continue
+                    due += 1
+                    hit = (day.date().isoformat(), m.id, t) in taken
+                    got += hit
+                    slot = by_time.setdefault(t, [0, 0])
+                    slot[0] += 1
+                    slot[1] += hit
+            per_med.append({"name": m.name, "dose": m.dose, "times": m.times, "purpose": m.purpose,
+                            "instructions": m.instructions, "taken": got, "scheduled": due,
+                            "pct": round(100 * got / due) if due else None})
+        checkins = self.checkins(days)
+        moods = {k: sum(c.mood == k for c in checkins) for k in ("great", "good", "okay", "low", "unwell")}
+        symptoms = [{"at": c.at, "concerns": c.concerns, "notes": c.notes} for c in checkins if c.concerns]
+        events = [a.model_dump(include={"created_at", "level", "kind", "title", "detail"}) for a in self.alerts()
+                  if a.created_at >= cutoff and a.kind in ("emergency", "checkin", "scam", "pattern", "interaction", "no_checkin", "inactivity")]
+        scheduled = sum(x["scheduled"] for x in per_med)
+        overall = round(100 * sum(x["taken"] for x in per_med) / scheduled) if scheduled else None
+        monitored = (current.date() - datetime.fromisoformat(since).date()).days + 1 if since else 0
+        report = {
+            "generated_at": current.isoformat(), "days": days, "monitored_days": min(days, monitored),
+            "patient": {"name": p.patient_name, "preferred_name": p.preferred_name},
+            "caregiver": {"name": p.caregiver_name, "relation": p.caregiver_relation},
+            "adherence_pct": overall, "medications": per_med,
+            "by_time": [{"time": t, "scheduled": v[0], "taken": v[1], "pct": round(100 * v[1] / v[0]) if v[0] else None}
+                        for t, v in sorted(by_time.items())],
+            "moods": moods, "symptoms": symptoms, "events": events,
+        }
+        weak = [x for x in report["by_time"] if x["pct"] is not None and x["pct"] < 80]
+        summary = (f"Over the last {min(days, monitored)} days {p.preferred_name} took {overall}% of scheduled doses"
+                   + (f", with most misses at {', '.join(spoken_time(x['time']) for x in weak)}." if weak else ".")
+                   + (f" Symptoms mentioned at check-ins: {', '.join(sorted({c for s in symptoms for c in s['concerns']}))}." if symptoms else ""))
+        questions = ["Can the medicine times be simplified, or doses combined?"] if weak else []
+        questions += [f"Is the {x['name']} dose still right?" for x in per_med if x["pct"] is not None and x["pct"] < 70][:2]
+        if symptoms:
+            questions.append("Could any of the symptoms mentioned be side effects of the current medicines?")
+        written = await llm.structured(
+            "You prepare a short summary for an older adult's doctor visit, from home monitoring data collected by "
+            "Kinvesper, a voice assistant. Write `summary`: 3-5 neutral, factual sentences a doctor can scan in "
+            "seconds (adherence, patterns by time of day, mood, symptoms reported, falls or emergencies). Then "
+            "`questions`: 3-5 short questions the family could ask the doctor, based only on the data. No diagnosis, "
+            "no advice to change medicines.",
+            json.dumps(report), {"type": "object", "properties": {"summary": {"type": "string"},
+                                 "questions": {"type": "array", "items": {"type": "string"}}},
+                                 "required": ["summary", "questions"], "additionalProperties": False}, max_tokens=1200)
+        report["summary"] = (written or {}).get("summary") or summary
+        report["questions"] = (written or {}).get("questions") or questions or ["Is everything on the current list still needed?"]
+        return report
 
     # ---------- dashboard ----------
 
@@ -766,7 +1145,10 @@ class CareService:
             "reminders": [r.model_dump() for r in self.reminders()[:10]],
             "latest_report": next((a.model_dump() for a in self.alerts() if a.kind == "report"), None),
             "alerts_reach": {"phone": bool(p.caregiver_phone), "email": bool(p.caregiver_email),
-                             "backup": bool(p.backup_phone or p.backup_email)},
+                             "backup": bool(p.backup_phone or p.backup_email), "calls": notify.calls_enabled() and bool(p.caregiver_phone)},
+            "family_messages": [m.model_dump() for m in self.family_messages()[:5]],
+            "memories": [m.model_dump() for m in self.memories()[:6]],
+            "ask_enabled": llm.enabled(),
         }
 
     # ---------- summaries ----------
@@ -776,11 +1158,12 @@ class CareService:
         logs = self.store.load_all("dose", DoseLog)
         taken_keys = {(d.date, d.medication_id, d.slot) for d in logs}
         meds = self.medications()
+        since = self._monitored_since()
         out = []
         for back in range(days - 1, -1, -1):
             day = current - timedelta(days=back)
             date = day.date().isoformat()
-            slots = [(m.id, t) for m in meds for t in m.times]
+            slots = [(m.id, t) for m in meds for t in m.times if self._expected(m, _at(day, t), since)]
             if back == 0:  # today: only doses whose grace period has passed, or already taken
                 slots = [
                     (mid, t) for mid, t in slots
@@ -828,6 +1211,7 @@ class CareService:
     def _missed_labels(self, days: int) -> list[str]:
         current = now()
         taken = {(d.date, d.medication_id, d.slot) for d in self.store.load_all("dose", DoseLog)}
+        since = self._monitored_since()
         out = []
         for back in range(days - 1, -1, -1):
             day = current - timedelta(days=back)
@@ -835,6 +1219,6 @@ class CareService:
             for m in self.medications():
                 for t in m.times:
                     overdue = current > _at(day, t) + timedelta(minutes=settings.missed_dose_grace_min)
-                    if overdue and (date, m.id, t) not in taken:
+                    if overdue and (date, m.id, t) not in taken and self._expected(m, _at(day, t), since):
                         out.append(f"{day.strftime('%a')} {spoken_time(t)} {m.name}")
         return out

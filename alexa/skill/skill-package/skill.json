@@ -140,7 +140,38 @@
         "endpoint": {
           "uri": "https://dphwkv3b5f.us-east-1.awsapprunner.com/alexa",
           "sslCertificateType": "Wildcard"
-        }
+        },
+        "interfaces": [
+          {
+            "type": "ALEXA_PRESENTATION_APL",
+            "supportedViewports": [
+              {
+                "mode": "HUB",
+                "shape": "RECTANGLE",
+                "minWidth": 960,
+                "maxWidth": 1279,
+                "minHeight": 480,
+                "maxHeight": 799
+              },
+              {
+                "mode": "HUB",
+                "shape": "RECTANGLE",
+                "minWidth": 1280,
+                "maxWidth": 1920,
+                "minHeight": 600,
+                "maxHeight": 1279
+              },
+              {
+                "mode": "HUB",
+                "shape": "ROUND",
+                "minWidth": 480,
+                "maxWidth": 599,
+                "minHeight": 480,
+                "maxHeight": 599
+              }
+            ]
+          }
+        ]
       }
     },
     "privacyAndCompliance": {

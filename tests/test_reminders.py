@@ -42,7 +42,9 @@ async def test_one_daily_reminder_per_dose_time(bridge, api, service):
     reply = await bridge.handle(_intent("SetUpRemindersIntent"))
     assert "Every day at 6:30 AM, 8 AM and 8 PM" in _said(reply)
     bodies = sorted(api.reminders.values(), key=lambda b: b["trigger"]["recurrence"]["recurrenceRules"][0])
-    assert len(bodies) == 3  # Metformin and Lisinopril share 8 AM
+    assert len(bodies) == 4  # Metformin and Lisinopril share 8 AM; 10 AM is the daily "I'm okay" check-in
+    checkin = next(b for b in bodies if "BYHOUR=10;" in b["trigger"]["recurrence"]["recurrenceRules"][0])
+    assert "Kinvesper checking in" in checkin["alertInfo"]["spokenInfo"]["content"][0]["text"]
     rules = [b["trigger"]["recurrence"]["recurrenceRules"][0] for b in bodies]
     assert "FREQ=DAILY;BYHOUR=8;BYMINUTE=0;BYSECOND=0;INTERVAL=1;" in rules
     morning = next(b for b in bodies if "BYHOUR=8;" in b["trigger"]["recurrence"]["recurrenceRules"][0])
@@ -65,7 +67,7 @@ async def test_asks_for_permission_by_voice_then_sets_them(bridge, api):
               "request": {"type": "Connections.Response", "name": "AskFor", "locale": "en-US",
                           "payload": {"permissionScopes": [{"permissionScope": "alexa::alerts:reminders:skill:readwrite", "status": "ACCEPTED"}]}}}
     assert "Every day at" in _said(await bridge.handle(answer))
-    assert len(api.reminders) == 3
+    assert len(api.reminders) == 4  # three dose times and the daily check-in
 
     answer["request"]["payload"]["permissionScopes"][0]["status"] = "DENIED"
     assert "no reminders for now" in _said(await bridge.handle(answer))
@@ -81,7 +83,7 @@ async def test_medicine_changes_rebuild_the_reminders(bridge, api, service):
     await service.update_settings({**view["profile"], "caregiver_email": "a@b.co"}, view["medications"][:1])
     result = await sync()
     assert result.outcome == "ok" and result.times == ["06:30"]
-    assert len(api.reminders) == 1 and not first & set(api.reminders)  # the old ones were deleted
+    assert len(api.reminders) == 2 and not first & set(api.reminders)  # the old ones were deleted (the other is the check-in)
 
     reply = await bridge.handle(_intent("RemoveRemindersIntent"))
     assert "turned off" in _said(reply) and not api.reminders
@@ -93,7 +95,7 @@ async def test_launch_refreshes_quietly(bridge, api):
     await bridge.handle(launch)
     for task in list(bridge._background):
         await task
-    assert len(api.reminders) == 3
+    assert len(api.reminders) == 4
 
     api.allowed = False  # never allowed: launching still just greets
     reply = await bridge.handle({**launch, "session": {"sessionId": "s3", "new": True}})

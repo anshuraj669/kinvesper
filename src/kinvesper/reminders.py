@@ -70,6 +70,11 @@ def ringing(profile: Profile, meds: list[Medication], reminders: list[Reminder],
     important one's heads-up, as (key, text, is_alarm). The voice simulator rings these itself."""
     out: list[tuple[str, str, bool]] = []
     name = profile.preferred_name
+    if profile.checkin_time:
+        h, m = (int(x) for x in profile.checkin_time.split(":"))
+        at = current.replace(hour=h, minute=m, second=0, microsecond=0)
+        if since < at <= current:
+            out.append((f"checkin:{at.date()}", t(locale, "checkin_prompt", name=name), False))
     for time, group in doses_by_time(meds).items():
         h, m = (int(x) for x in time.split(":"))
         at = current.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -152,6 +157,10 @@ class EchoReminders:
             return SyncResult("error", [])
         groups = doses_by_time(meds)
         texts = {time: reminder_text(profile, ms, locale) for time, ms in groups.items()}
+        if profile.checkin_time:  # the daily "I'm okay" check-in, asked by the Echo itself
+            prompt = t(locale, "checkin_prompt", name=profile.preferred_name)
+            texts[profile.checkin_time] = f"{prompt} {texts[profile.checkin_time]}" if profile.checkin_time in texts else prompt
+            texts = dict(sorted(texts.items()))
         signature = hashlib.sha256(json.dumps([texts, locale, tz_name()], sort_keys=True).encode()).hexdigest()
         record = self.store.get("echo_reminders", self._key(user)) or {}
         if record.get("signature") == signature and not force:
@@ -173,7 +182,7 @@ class EchoReminders:
                 log.warning("Couldn't set the Echo reminders: %s", e)
                 return SyncResult("error", [])
         self.store.put("echo_reminders", self._key(user), {"signature": signature, "tokens": tokens})
-        log.info("Echo reminders set for %s", ", ".join(groups))
+        log.info("Echo reminders set for %s", ", ".join(texts))
         return SyncResult("ok", list(groups))
 
     async def push(self, system: dict, profile: Profile, reminders: list[Reminder], locale: str) -> Outcome:

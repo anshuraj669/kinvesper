@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doctor Visit Summary</title>
+<style>
+  /* Same spatial look as the dashboard on screen; plain black on white when printed. */
+  :root {
+    color-scheme: light;
+    --base: #e9eef0; --ink: #0f1a19; --ink-2: #33423f; --muted: #556461; --line: rgba(15,30,28,.11);
+    --glass: rgba(255,255,255,.62); --glass-strong: rgba(255,255,255,.82); --glass-edge: rgba(255,255,255,.75);
+    --well: rgba(15,30,28,.06); --well-edge: rgba(15,30,28,.08);
+    --brand: #0f766e; --brand-ink: #fff; --good: #0b8f0b; --warning: #e9a00a; --critical: #d03b3b; --series: #2a78d6;
+    --blob-1: #7dd3c8; --blob-2: #93b8f5; --blob-3: #c9b6f2; --blob-4: #f7c9a8;
+    --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.35) inset, 0 2px 6px rgba(20,40,40,.06), 0 24px 48px -18px rgba(20,40,60,.28);
+    --blur: blur(28px) saturate(170%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --base: #070b0f; --ink: #eef4f3; --ink-2: #c4d0cd; --muted: #97a6a3; --line: rgba(255,255,255,.10);
+      --glass: rgba(38,48,54,.5); --glass-strong: rgba(44,56,62,.78); --glass-edge: rgba(255,255,255,.16);
+      --well: rgba(0,0,0,.24); --well-edge: rgba(255,255,255,.06);
+      --brand: #2dd4bf; --brand-ink: #04201c; --good: #34c759; --warning: #ffcc33; --critical: #ff6b63; --series: #5aa0f0;
+      --blob-1: #0e6b62; --blob-2: #1d3f8a; --blob-3: #4b2a7a; --blob-4: #7a3b1f;
+      --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.07) inset, 0 24px 56px -20px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --base: #070b0f; --ink: #eef4f3; --ink-2: #c4d0cd; --muted: #97a6a3; --line: rgba(255,255,255,.10);
+    --glass: rgba(38,48,54,.5); --glass-strong: rgba(44,56,62,.78); --glass-edge: rgba(255,255,255,.16);
+    --well: rgba(0,0,0,.24); --well-edge: rgba(255,255,255,.06);
+    --brand: #2dd4bf; --brand-ink: #04201c; --good: #34c759; --warning: #ffcc33; --critical: #ff6b63; --series: #5aa0f0;
+    --blob-1: #0e6b62; --blob-2: #1d3f8a; --blob-3: #4b2a7a; --blob-4: #7a3b1f;
+    --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.07) inset, 0 24px 56px -20px rgba(0,0,0,.7);
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--base); }
+  body { margin: 0; color: var(--ink); background: transparent; font: 15px/1.55 -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  .backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .backdrop i { position: absolute; width: 58vmax; height: 58vmax; border-radius: 50%; filter: blur(90px); opacity: .7; }
+  .backdrop i:nth-child(1) { background: var(--blob-1); top: -22vmax; left: -14vmax; }
+  .backdrop i:nth-child(2) { background: var(--blob-2); top: -10vmax; right: -20vmax; }
+  .backdrop i:nth-child(3) { background: var(--blob-3); bottom: -26vmax; left: 18vmax; }
+  .backdrop i:nth-child(4) { background: var(--blob-4); bottom: -30vmax; right: -12vmax; opacity: .45; }
+  .glass { background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--depth); }
+  @media (prefers-reduced-transparency: reduce) { .glass { background: var(--glass-strong); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+
+  .toolbar { position: sticky; top: 14px; z-index: 5; max-width: 900px; margin: 14px auto 0; padding: 0 20px; }
+  .ornament { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-radius: 999px; background: var(--glass-strong); }
+  .ornament h1 { font-size: 16px; margin: 0; font-weight: 650; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .btn { font: inherit; font-size: 14px; font-weight: 600; padding: 8px 15px; border-radius: 999px; cursor: pointer; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px; color: var(--ink); border: none; background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; }
+  .btn.primary { background: var(--brand); color: var(--brand-ink); }
+  .btn svg { width: 16px; height: 16px; }
+  select { font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 999px; border: none; background: var(--well); color: var(--ink); box-shadow: 0 0 0 1px var(--well-edge) inset; }
+  .btn:focus-visible, select:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+  main.sheet { max-width: 900px; margin: 22px auto 48px; padding: 32px 36px; border-radius: 26px; }
+  .head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 18px; }
+  .head h2 { margin: 0; font-size: 24px; letter-spacing: -.01em; }
+  .head .meta { color: var(--muted); font-size: 13.5px; text-align: right; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; }
+  .summary { font-size: 16px; margin: 0; }
+  .big { font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
+  .kpis { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 10px; }
+  .kpi .label { font-size: 13px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; border-top: none; font-size: 12.5px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  .bars { display: grid; gap: 8px; }
+  .bar { display: grid; grid-template-columns: 80px 1fr 60px; gap: 10px; align-items: center; font-size: 14px; }
+  .track { height: 10px; border-radius: 999px; background: var(--well); overflow: hidden; }
+  .track span { display: block; height: 100%; border-radius: 999px; background: var(--series); }
+  .track span.low { background: var(--warning); }
+  ul.plain { margin: 0; padding-left: 18px; }
+  ul.plain li { margin: 3px 0; }
+  ol.questions { margin: 0; padding-left: 0; list-style: none; counter-reset: q; }
+  ol.questions li { counter-increment: q; display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+  ol.questions li:first-child { border-top: none; }
+  ol.questions li::before { content: "☐"; color: var(--muted); }
+  .moods { display: flex; gap: 8px; flex-wrap: wrap; }
+  .mood { padding: 3px 10px; border-radius: 999px; background: var(--well); font-size: 13.5px; }
+  .foot { margin-top: 26px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .empty { color: var(--muted); }
+  .loading { text-align: center; color: var(--muted); padding: 40px 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; }
+  @media (max-width: 700px) {
+    .toolbar { padding: 0 16px; top: 10px; margin-top: 10px; }
+    .ornament { border-radius: 22px; flex-wrap: wrap; }
+    .btn .label { display: none; }
+    main.sheet { margin: 14px 16px 40px; padding: 20px 18px; border-radius: 22px; }
+    .two { grid-template-columns: 1fr; }
+    .head .meta { text-align: left; }
+  }
+  @media print {
+    html, body { background: #fff !important; color: #000; }
+    .backdrop, .toolbar { display: none !important; }
+    main.sheet { box-shadow: none !important; background: #fff !important; -webkit-backdrop-filter: none; backdrop-filter: none; margin: 0; padding: 0; max-width: none; }
+    :root { --ink: #000; --ink-2: #222; --muted: #555; --line: #ccc; --well: #eee; --series: #333; --warning: #888; }
+    h3 { break-after: avoid; }
+    table, .bars, ol.questions { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<div class="toolbar">
+  <div class="ornament glass">
+    <a class="btn" id="back" href="/dashboard" title="Back to the dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      <span class="label">Dashboard</span>
+    </a>
+    <h1>Doctor visit summary</h1>
+    <label class="sr" for="days" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Period</label>
+    <select id="days" aria-label="Period">
+      <option value="14">Last 2 weeks</option>
+      <option value="30" selected>Last 30 days</option>
+      <option value="90">Last 3 months</option>
+    </select>
+    <button class="btn primary" id="print" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9V3h12v6"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 14h10v7H7z"/></svg>
+      <span class="label">Print or save PDF</span>
+    </button>
+  </div>
+</div>
+<main class="sheet glass" id="sheet"><p class="loading">Putting the summary together…</p></main>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const key = params.get("key") || "";
+  const headers = key ? { "X-Dashboard-Key": key } : {};
+  if (key) document.getElementById("back").href = `/dashboard?key=${encodeURIComponent(key)}`;
+  const $ = (id) => document.getElementById(id);
+  if (params.get("days")) $("days").value = params.get("days");
+
+  function h(tag, attrs = {}, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") el.className = v; else if (v !== undefined && v !== null && v !== false) el.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) el.append(kid);
+    return el;
+  }
+  const clock = (hhmm) => new Date(`2000-01-01T${hhmm}:00`).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const date = (iso, opts = { month: "short", day: "numeric" }) => new Date(iso).toLocaleDateString(undefined, opts);
+  const KIND = { emergency: "Emergency", checkin: "Unwell at check-in", scam: "Suspicious call", pattern: "Repeated questions",
+                 interaction: "Medicine interaction", no_checkin: "No check-in", inactivity: "Quiet day" };
+
+  function render(r) {
+    const span = `${date(new Date(Date.now() - (r.days - 1) * 864e5).toISOString(), { month: "short", day: "numeric" })} to ${date(r.generated_at, { month: "short", day: "numeric", year: "numeric" })}`;
+    const meds = h("table", {},
+      h("thead", {}, h("tr", {}, h("th", {}, "Medicine"), h("th", {}, "When"), h("th", {}, "For"), h("th", { class: "num" }, "Taken"))),
+      h("tbody", {}, r.medications.map((m) => h("tr", {},
+        h("td", {}, h("strong", {}, m.name), ` ${m.dose}`, m.instructions ? h("div", { class: "sub" }, m.instructions) : null),
+        h("td", {}, m.times.map(clock).join(", ")),
+        h("td", {}, m.purpose || "—"),
+        h("td", { class: "num" }, m.pct === null ? "—" : `${m.pct}%`, h("div", { class: "sub" }, `${m.taken} of ${m.scheduled}`))))));
+    const bars = h("div", { class: "bars" }, r.by_time.map((b) => h("div", { class: "bar" },
+      h("span", {}, clock(b.time)),
+      h("div", { class: "track", role: "img", "aria-label": `${b.pct}% taken at ${clock(b.time)}` }, h("span", { class: b.pct < 80 ? "low" : "", style: `width:${b.pct ?? 0}%` })),
+      h("span", { class: "num" }, b.pct === null ? "—" : `${b.pct}%`))));
+    const moods = Object.entries(r.moods).filter(([, n]) => n);
+    const symptoms = r.symptoms.length
+      ? h("ul", { class: "plain" }, r.symptoms.map((s) => h("li", {}, `${date(s.at)}: ${s.concerns.join(", ")}`, s.notes ? h("span", { class: "sub" }, ` — “${s.notes}”`) : null)))
+      : h("p", { class: "empty" }, "None reported at check-ins.");
+    const events = r.events.length
+      ? h("ul", { class: "plain" }, r.events.map((e) => h("li", {}, `${date(e.created_at)} · ${KIND[e.kind] || e.kind}: ${e.title}`)))
+      : h("p", { class: "empty" }, "No emergencies, falls or other alerts.");
+    $("sheet").replaceChildren(
+      h("div", { class: "head" },
+        h("div", {}, h("h2", {}, r.patient.name), h("div", { class: "sub" }, `Prepared for the doctor by ${r.caregiver.name} (${r.caregiver.relation})`)),
+        h("div", { class: "meta" }, h("div", {}, span), h("div", {}, r.monitored_days < r.days ? `Kinvesper in use for ${r.monitored_days} of these days` : `${r.days} days of home monitoring`))),
+      h("h3", {}, "Summary"),
+      h("p", { class: "summary" }, r.summary),
+      h("div", { class: "kpis" },
+        h("div", { class: "kpi" }, h("div", { class: "big" }, r.adherence_pct === null ? "—" : `${r.adherence_pct}%`), h("div", { class: "label" }, "of scheduled doses taken")),
+        h("div", { class: "kpi" }, h("div", { class: "big" }, String(r.symptoms.length)), h("div", { class: "label" }, "check-ins with symptoms")),
+        h("div", { class: "kpi" }, h("div", { class: "big" }, String(r.events.filter((e) => e.kind === "emergency").length)), h("div", { class: "label" }, "emergencies"))),
+      h("h3", {}, "Medicines and how reliably they're taken"), meds,
+      h("div", { class: "two" },
+        h("div", {}, h("h3", {}, "Doses taken by time of day"), bars),
+        h("div", {}, h("h3", {}, "Mood at daily check-ins"),
+          moods.length ? h("div", { class: "moods" }, moods.map(([m, n]) => h("span", { class: "mood" }, `${m[0].toUpperCase() + m.slice(1)}: ${n}`))) : h("p", { class: "empty" }, "No check-ins.")),
+      ),
+      h("h3", {}, "Symptoms mentioned"), symptoms,
+      h("h3", {}, "Events"), events,
+      h("h3", {}, "Questions to ask"),
+      h("ol", { class: "questions" }, r.questions.map((q) => h("li", {}, q))),
+      h("p", { class: "foot" }, `Generated by Kinvesper on ${date(r.generated_at, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} from what ${r.patient.preferred_name} logged by voice. It shows what was recorded at home and isn't a diagnosis.`),
+    );
+    document.title = `Doctor Visit Summary · ${r.patient.preferred_name}`;
+  }
+
+  async function load() {
+    $("sheet").replaceChildren(h("p", { class: "loading" }, "Putting the summary together…"));
+    try {
+      const r = await fetch(`/api/reports/doctor?days=${$("days").value}`, { headers });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      render(data);
+    } catch (e) {
+      $("sheet").replaceChildren(h("p", { class: "loading" }, `Couldn't make the summary: ${e.message}`));
+    }
+  }
+  $("days").addEventListener("change", load);
+  $("print").addEventListener("click", () => window.print());
+  load();
+})();
+</script>
+</body>
+</html>

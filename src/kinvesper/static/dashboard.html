@@ -234,6 +234,31 @@
   .card .sub a:hover { text-decoration: underline; }
   .report { white-space: pre-line; color: var(--ink-2); margin: 0 0 12px; }
 
+  /* ---- ask Kinvesper ---- */
+  .ask-form { display: flex; gap: 8px; padding: 6px; border-radius: 999px; background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; }
+  .ask-form:focus-within { box-shadow: 0 0 0 2px var(--brand) inset, 0 0 0 5px var(--brand-soft); }
+  .ask-form input { flex: 1; min-width: 0; font: inherit; border: none; background: none; color: var(--ink); padding: 8px 12px; outline: none; }
+  .suggest { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .suggest button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 999px; border: none; cursor: pointer; color: var(--ink-2);
+    background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; transition: background .2s; }
+  .suggest button:hover { background: var(--glass-strong); }
+  .qa { display: grid; gap: 12px; margin-top: 14px; }
+  .qa:empty { display: none; }
+  .qa .q { font-weight: 650; font-size: 14px; color: var(--ink-2); }
+  .qa .a { margin-top: 3px; padding: 12px 14px; border-radius: 18px; border-top-left-radius: 6px; background: var(--glass-strong);
+    box-shadow: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px var(--well-edge) inset; white-space: pre-line; }
+  .qa .a.thinking { color: var(--muted); }
+  /* ---- family messages & memories ---- */
+  .compose { display: grid; gap: 8px; }
+  .compose textarea { font: inherit; resize: vertical; min-height: 70px; padding: 10px 12px; border: none; border-radius: 14px; color: var(--ink);
+    background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; }
+  .compose textarea:focus { outline: none; box-shadow: 0 0 0 2px var(--brand) inset, 0 0 0 5px var(--brand-soft); }
+  .compose .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+  .compose .count { font-size: 12px; color: var(--muted); }
+  .memory { padding: 12px 14px; border-radius: 18px; background: var(--well); margin-bottom: 10px; }
+  .memory p { margin: 4px 0 0; white-space: pre-line; }
+  .memory:last-child { margin-bottom: 0; }
+
   @media (prefers-reduced-motion: reduce) {
     .backdrop i, .card, .banner .icon { animation: none !important; }
     .card, .card:hover, .btn, .btn:hover { transition: none; transform: none; }
@@ -272,6 +297,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
       <span class="label">Run checks</span>
     </button>
+    <a class="btn" id="doctor" href="/dashboard/doctor" title="A printable summary for the next doctor's visit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"/><path d="M12 10v6M9 13h6"/></svg>
+      <span class="label">Doctor visit</span>
+    </a>
     <a class="btn" id="settings" href="/dashboard/settings" title="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
       <span class="label">Settings</span>
@@ -290,6 +319,7 @@
   const key = new URLSearchParams(location.search).get("key") || "";
   const headers = key ? { "X-Dashboard-Key": key } : {};
   if (key) document.getElementById("settings").href = `/dashboard/settings?key=${encodeURIComponent(key)}`;
+  if (key) document.getElementById("doctor").href = `/dashboard/doctor?key=${encodeURIComponent(key)}`;
   const MOODS = ["great", "good", "okay", "low", "unwell"];
   const STATUS = {
     taken: ["good", "Taken"], due: ["warning", "Due now"], missed: ["critical", "Missed"], upcoming: ["muted", "Upcoming"],
@@ -474,6 +504,7 @@
   const KIND = {
     missed_dose: "Missed dose", scam: "Scam", inactivity: "Quiet", emergency: "Emergency", refill: "Refill",
     caregiver_message: "Message", checkin: "Check-in", low_stock: "Low stock", test: "Test", report: "Report", reminder: "Reminder",
+    interaction: "Interaction", pattern: "Pattern", no_checkin: "No check-in",
   };
   const BANNER_ICON = {
     good: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
@@ -560,6 +591,7 @@
             h("div", { class: "title" }, a.title, h("span", { class: "kind" }, KIND[a.kind] || a.kind)),
             a.detail ? h("div", { class: "detail" }, a.detail) : null,
             h("div", { class: "meta" }, status(a.level), ` · ${ago(a.created_at)}`, a.notified ? ` · sent to ${p.caregiver_name}` : "",
+              a.called_at ? ` · phoned ${p.caregiver_name}` : "",
               a.escalated_at ? " · sent to the backup contact" : "", a.acknowledged ? " · acknowledged" : "")),
           a.acknowledged ? null : h("button", { class: "btn", type: "button", onclick: () => ack(a.id) }, "Acknowledge"))))
       : h("p", { class: "empty" }, alertView === "open" ? "Nothing needs your attention. All quiet." : "No alerts yet.");
@@ -631,6 +663,7 @@
       tile("Doses today", `${taken} of ${today.length}`, missed ? `${missed} missed` : "None missed"),
       tile("Open alerts", String(openAlerts.length), urgent ? `${urgent} urgent` : "None urgent"),
       tile("Last active", ago(p.last_activity), p.last_activity ? new Date(p.last_activity).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : "", "last"),
+      askCard(d),
       alertsCard,
       todayCard,
       card("span-7", "Doses taken, last 7 days", "Share of scheduled doses logged each day. Today counts only doses already due.",
@@ -644,13 +677,96 @@
           d.checkins.map((c) => [day(c.at, { weekday: "short", month: "short", day: "numeric" }), c.mood, c.notes || "—"]))),
       reportCard,
       card("span-5", "Reminders and alarms", "Set by voice. Alarms ring on the Echo.", reminders),
+      messagesCard(d),
+      memoriesCard(d),
       card("span-7", "Medications", h("a", { href: document.getElementById("settings").href }, "Edit in Settings"), meds),
       card("span-5", "Pharmacy refills", p.pharmacy_name, refills),
     ].filter(Boolean));
     main.querySelectorAll(".card").forEach((c, i) => (c.style.animationDelay = `${Math.min(i, 10) * 40}ms`));
     if (rendered) main.classList.add("loaded");  // only the first view rises into place, not every refresh
     rendered = true;
+    drawAsk();
     tickUpdated();
+  }
+
+  // ---- Ask Kinvesper: questions about the person, answered by Claude from the care data
+  const qa = [];  // {q, a}, kept across refreshes
+  let asking = false;
+  async function ask(question) {
+    question = question.trim();
+    if (!question || asking) return;
+    asking = true;
+    qa.push({ q: question, a: null });
+    drawAsk();
+    try {
+      const r = await fetch("/api/ask", { method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ question, history: qa.slice(0, -1).filter((x) => x.a) }) });
+      const data = await r.json();
+      qa[qa.length - 1].a = r.ok ? data.answer : data.error || "Sorry, something went wrong.";
+    } catch {
+      qa[qa.length - 1].a = "Sorry, I couldn't reach Kinvesper. Please try again.";
+    }
+    asking = false;
+    drawAsk();
+  }
+  function drawAsk() {
+    const list = document.getElementById("qa");
+    if (!list) return;
+    list.replaceChildren(...qa.slice(-3).map((x) => h("div", {},
+      h("div", { class: "q" }, x.q),
+      h("div", { class: `a${x.a === null ? " thinking" : ""}`, "aria-live": "polite" }, x.a === null ? "Looking through the last two weeks…" : x.a))));
+  }
+  function askCard(d) {
+    const name = d.profile.preferred_name;
+    const input = h("input", { type: "text", placeholder: `Ask anything about ${name}'s care…`, "aria-label": `Ask about ${name}`, maxlength: "300" });
+    const form = h("form", { class: "ask-form", onsubmit: (e) => { e.preventDefault(); ask(input.value); input.value = ""; } },
+      input, h("button", { class: "btn primary", type: "submit" }, "Ask"));
+    const ideas = [`How has ${name} been this week?`, "Which doses get missed most?", "Anything I should worry about?", `When did ${name} last talk to Kinvesper?`];
+    const card = h("section", { class: "card span-12" },
+      h("h2", {}, "Ask Kinvesper"),
+      h("p", { class: "sub" }, d.ask_enabled ? `Claude answers from ${name}'s last two weeks: doses, check-ins, alerts and messages.` : "Needs Claude, which isn't set up on this server."),
+      form,
+      h("div", { class: "suggest" }, ideas.map((q) => h("button", { type: "button", onclick: () => ask(q) }, q))),
+      h("div", { class: "qa", id: "qa" }));
+    if (!d.ask_enabled) form.querySelectorAll("input, button").forEach((x) => (x.disabled = true));
+    return card;
+  }
+
+  // ---- family messages: typed here, read out on the Echo
+  let draft = "";
+  function messagesCard(d) {
+    const p = d.profile;
+    const box = h("textarea", { maxlength: "500", placeholder: `e.g. "I'll visit on Sunday with the kids!"`, "aria-label": `Message for ${p.preferred_name}` });
+    box.value = draft;
+    const count = h("span", { class: "count" }, `${draft.length}/500`);
+    box.addEventListener("input", () => { draft = box.value; count.textContent = `${draft.length}/500`; });
+    const send = h("button", { class: "btn primary", type: "submit" }, "Send");
+    const form = h("form", { class: "compose", onsubmit: async (e) => {
+      e.preventDefault();
+      if (!box.value.trim()) return box.focus();
+      send.disabled = true;
+      const r = await fetch("/api/messages", { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ text: box.value }) });
+      send.disabled = false;
+      if (r.ok) { draft = ""; toast(`Sent. Kinvesper will read it to ${p.preferred_name}.`); load(); } else toast("Couldn't send the message");
+    } }, box, h("div", { class: "row" }, count, send));
+    const sent = d.family_messages.length
+      ? h("ul", { class: "rows", style: "margin-top:14px" }, d.family_messages.map((m) => h("li", {}, h("div", { class: "main" },
+          h("div", { class: "detail", style: "color:var(--ink)" }, m.text),
+          h("div", { class: "meta" }, status(m.heard_at ? "taken" : "upcoming"),
+            m.heard_at ? ` · ${p.preferred_name} heard it ${ago(m.heard_at)}` : ` · plays next time ${p.preferred_name} uses Alexa`, ` · sent ${ago(m.created_at)}`)))))
+      : null;
+    if (sent) sent.querySelectorAll(".status").forEach((s, i) => (s.lastChild.textContent = d.family_messages[i].heard_at ? "Heard" : "Waiting"));
+    return card("span-5", `Send ${p.preferred_name} a message`, "Kinvesper reads it out on the Echo the next time it's used.", form, sent);
+  }
+
+  function memoriesCard(d) {
+    const p = d.profile;
+    const body = d.memories.length
+      ? d.memories.map((m) => h("div", { class: "memory" },
+          h("div", { class: "meta" }, m.topic ? h("span", { class: "kind", style: "margin:0 6px 0 0" }, m.topic[0].toUpperCase() + m.topic.slice(1)) : null, ago(m.at)),
+          h("p", {}, m.text)))
+      : [h("p", { class: "empty" }, `When ${p.preferred_name} says “let's chat”, Kinvesper asks about their life. The stories ${p.preferred_name} shares appear here.`)];
+    return card("span-7", "Memories", `Stories ${p.preferred_name} shared in companionship chats`, ...body);
   }
 
   function i18nNext(next) {
@@ -686,7 +802,8 @@
     toast(r.ok ? (data.raised ? `${data.raised} new alert${data.raised > 1 ? "s" : ""}` : "Checks done. Nothing new.") : "Checks failed");
     load();
   });
-  setInterval(() => { if (document.visibilityState === "visible") load(); }, 15000);
+  const typing = () => document.activeElement?.matches?.("#main input, #main textarea") && document.activeElement.value;
+  setInterval(() => { if (document.visibilityState === "visible" && !typing()) load(); }, 15000);  // never under someone's typing
   load();
 })();
 </script>

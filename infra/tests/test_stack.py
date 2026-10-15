@@ -73,6 +73,7 @@ def test_instance_role_least_privilege(template):
     assert "sns:Publish" in actions
     assert "polly:SynthesizeSpeech" in actions
     assert "transcribe:StartStreamTranscription" in actions
+    assert "sms-voice:SendVoiceMessage" in actions
     assert not any(a.endswith(":*") or a == "*" for a in actions)
 
 
@@ -176,3 +177,8 @@ def test_alexa_client_only_with_vendor_id(template):
 def test_skill_bridge_only_with_skill_id(template):
     assert "ALEXA_SKILL_ID" not in _env(template)
     assert _env(synth(alexa_skill_id="amzn1.ask.skill.x"))["ALEXA_SKILL_ID"] == "amzn1.ask.skill.x"
+
+
+def test_phone_calls_only_with_a_calling_number(template):
+    assert "VOICE_CALL_FROM" not in _env(template)
+    assert _env(synth(voice_call_from="+18005550100"))["VOICE_CALL_FROM"] == "+18005550100"

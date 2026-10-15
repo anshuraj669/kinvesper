@@ -25,15 +25,19 @@ from mcp.types import (
 from pydantic import BaseModel, Field
 
 from .auth import JwtTokenVerifier, auth_settings
-from .config import settings
+from .config import now, settings
 from .icons import AMBER, BLUE, GREEN, PURPLE, RED, SLATE, TEAL, icon
 from .models import (
     CareSummary,
     CheckInResult,
     ContactResult,
+    ConversationStarter,
+    InteractionResult,
     LogDoseResult,
     Medication,
     MedicationResult,
+    MemoryResult,
+    MessagesResult,
     NotifyResult,
     RefillResult,
     ReminderResult,
@@ -55,6 +59,12 @@ connected to family. You are talking to the older adult by voice unless told oth
 - For a fall, chest pain, trouble breathing or any emergency, call emergency_help immediately.
 - When they're running low or ask for more pills, offer request_pharmacy_refill. It runs as a
   task when the client supports tasks: tell them it's underway and share the result when ready.
+- Before they take anything new (a painkiller, a supplement, a new prescription), call
+  check_medicine_interactions. Never say a combination is safe yourself.
+- When they ask for messages, or at the start of a conversation if they haven't heard them, use
+  get_family_messages.
+- If they're lonely, bored or want to chat, use start_conversation and talk with them about their
+  life, one gentle question at a time. When they share a memory, save it with save_memory.
 """
 
 # Set while a tool runs inside a task, so the tool can report progress on it.
@@ -149,10 +159,11 @@ def build_server(service: CareService) -> KinvesperMCP:
         ),
         annotations=read_only,
     )
-    def get_medication_schedule(
+    async def get_medication_schedule(
         medication: Annotated[str | None, Field(description="Optional medication name or purpose")] = None,
     ) -> ScheduleResult:
         service.touch_activity()  # any interaction counts as activity
+        await service.note_repeat("schedule")
         return service.schedule(medication)
 
     @mcp.tool(
@@ -164,11 +175,14 @@ def build_server(service: CareService) -> KinvesperMCP:
         ),
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False),
     )
-    def log_medication_dose(
+    async def log_medication_dose(
         medication: Annotated[str, Field(description="Medication name or purpose, e.g. 'Metformin' or 'sugar pill'")],
     ) -> LogDoseResult:
         service.touch_activity()  # any interaction counts as activity
-        return service.log_dose(medication)
+        result = service.log_dose(medication)
+        if result.status == "already_taken":
+            await service.note_repeat("double_dose")
+        return result
 
     @mcp.tool(
         title="Add a medication",
@@ -176,7 +190,7 @@ def build_server(service: CareService) -> KinvesperMCP:
         description="Add a new prescription to the schedule (usually done by the caregiver).",
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
     )
-    def add_medication(
+    async def add_medication(
         name: str,
         dose: Annotated[str, Field(description="e.g. '10 mg'")],
         times: Annotated[list[str], Field(description="Daily times in 24h HH:MM, e.g. ['08:00', '20:00']")],
@@ -186,9 +200,29 @@ def build_server(service: CareService) -> KinvesperMCP:
     ) -> MedicationResult:
         med = service.add_medication(Medication(
             name=name, dose=dose, times=times, purpose=purpose, instructions=instructions, pills_remaining=pills_remaining,
+            added_at=now().isoformat(),  # earlier doses today were never due
         ))
         when = " and ".join(spoken_time(t) for t in med.times)
-        return MedicationResult(medication=med, message=f"Added {med.name} {med.dose}, taken at {when}.")
+        checked = await service.check_new_medicines([med.name])
+        warning = f" One thing to check: {checked.message}" if checked.interactions else ""
+        return MedicationResult(medication=med, message=f"Added {med.name} {med.dose}, taken at {when}.{warning}")
+
+    @mcp.tool(
+        title="Medicine interaction check",
+        icons=icon("shield", RED),
+        description=(
+            "Check whether a medicine, painkiller or supplement can be taken with the person's current medicines, "
+            "using the FDA's drug labels: 'can I take ibuprofen?', 'is it okay to take aspirin with my pills?'. Pass "
+            "`with_medicine` to check just one pair. Tells the family when there's a possible interaction."
+        ),
+        annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True),
+    )
+    async def check_medicine_interactions(
+        medicine: Annotated[str, Field(description="The medicine they want to take, e.g. 'ibuprofen', 'Advil', 'vitamin D'")],
+        with_medicine: Annotated[str, Field(description="Optional: one of their medicines to check against")] = "",
+    ) -> InteractionResult:
+        service.touch_activity()  # any interaction counts as activity
+        return await service.check_interactions(medicine, with_medicine)
 
     @mcp.tool(
         title="Scam check",
@@ -312,7 +346,8 @@ def build_server(service: CareService) -> KinvesperMCP:
         description="The person's upcoming one-off reminders and alarms.",
         annotations=read_only,
     )
-    def list_reminders() -> ReminderResult:
+    async def list_reminders() -> ReminderResult:
+        await service.note_repeat("reminders")
         return service.list_reminders()
 
     @mcp.tool(
@@ -326,6 +361,45 @@ def build_server(service: CareService) -> KinvesperMCP:
     ) -> ReminderResult:
         service.touch_activity()  # any interaction counts as activity
         return service.cancel_reminder(what)
+
+    @mcp.tool(
+        title="Family messages",
+        icons=icon("message", TEAL),
+        description="Messages the family sent from the Kinvesper dashboard, read out once: 'any messages for me?'.",
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+    )
+    def get_family_messages() -> MessagesResult:
+        service.touch_activity()  # any interaction counts as activity
+        return service.take_family_messages()
+
+    @mcp.tool(
+        title="Let's chat",
+        icons=icon("heart", PURPLE),
+        description=(
+            "Companionship: a gentle question about the person's life (childhood, work, family, music) to start a "
+            "warm conversation when they're lonely, bored or say 'let's chat'. Ask one question at a time and listen."
+        ),
+        annotations=read_only,
+    )
+    def start_conversation() -> ConversationStarter:
+        service.touch_activity()  # any interaction counts as activity
+        return service.conversation_starter()
+
+    @mcp.tool(
+        title="Save a memory",
+        icons=icon("heart", PURPLE),
+        description=(
+            "Save a story or memory the person told about their life, so their family can read it in the dashboard. "
+            "Use it when they share one in a chat; write it in the third person, in their words where you can."
+        ),
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
+    )
+    def save_memory(
+        memory: Annotated[str, Field(description="The memory, e.g. 'Grew up in Shimla; walked to school past apple orchards...'")],
+        topic: Annotated[str, Field(description="One word: childhood, food, work, festivals, music, friends, family, travel, proud, advice")] = "",
+    ) -> MemoryResult:
+        service.touch_activity()  # any interaction counts as activity
+        return service.save_memory(memory, topic)
 
     mcp.task_tools["request_pharmacy_refill"] = (
         "I've sent the refill request to the pharmacy. I'll let you know as soon as it's ready."

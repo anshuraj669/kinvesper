@@ -51,6 +51,8 @@ MAX_REPLY_TOKENS = 1024  # spoken replies are a few sentences
 # Free-text arguments the server scans for symptoms and scam signs. Small local models sometimes leave
 # them empty, so the person's own words are passed instead.
 SPOKEN_TEXT_ARGS = {"daily_check_in": "notes", "check_for_scam": "description"}
+# Tools whose reply the model words itself (a chat carries on), instead of reading out the tool's message.
+CONVERSATIONAL = {"save_memory"}
 TURN_TIMEOUT_S = 90
 CONFIRM_TIMEOUT_S = 120
 SESSION_IDLE_S = 30 * 60
@@ -63,7 +65,11 @@ Everything you write is spoken aloud by a speaker:
 - Answer just what was asked. Don't bring back earlier topics (like pills not taken yet) unless the
   question is about them: the care tools send their own reminders.
 - Use the tools for anything about medications, doses, scams, feelings, family or refills. Never
-  guess medical facts or the medication schedule.
+  guess medical facts or the medication schedule. Call get_medication_schedule every time they ask
+  about their pills, even if they asked a minute ago: doses change through the day, and how often
+  they ask matters to their family.
+- In a companionship chat, listen warmly. After save_memory, say something kind about what they
+  shared and ask one gentle follow-up question.
 - Prefer the tool's `message` or `spoken_summary`, in your own gentle words.
 - Answer anything else too, like any home assistant: facts, how-to, recipes, words, maths, stories,
   a joke. Use web search when the answer depends on today (weather, news, scores, opening hours) and
@@ -95,7 +101,7 @@ class TurnResult(BaseModel):
 class Announcement(BaseModel):
     text: str
     tool_calls: list[ToolCall] = []
-    ring: Literal["", "reminder", "alarm"] = ""  # a reminder going off: the page says it aloud
+    ring: Literal["", "reminder", "alarm", "message"] = ""  # a reminder going off or a family message: the page says it aloud
 
 
 def spoken_clock() -> str:
@@ -130,6 +136,10 @@ REFILL = re.compile(r"\b(refill|more of my|run(?:ning)? out|order (?:more|my)|ne
 REMIND = re.compile(r"\b(remind me|set (?:an? )?(?:important )?(?:alarm|reminder)|wake me up)\b")
 REMINDERS = re.compile(r"\b(?:what|which|any|my|list) (?:\w+ )?(?:reminders|alarms)\b")
 CANCEL_REMINDER = re.compile(r"\b(cancel|delete|remove|turn off)\b.*\b(reminder|alarm)\b")
+INTERACT = re.compile(r"\b(?:can|could|should|may) i (?:take|have|use)\s+(?:an? |some |my )?([a-z][a-z0-9 \-]*?)(?:\s+(?:with|and|along|together|while|if|now|today|tablets?|pills?)\b|[?.!,]|$)"
+                      r"|\bis (?:it )?(?:safe|okay|ok|fine) to take\s+(?:an? |some )?([a-z][a-z0-9 \-]*?)(?:\s+(?:with|and)\b|[?.!,]|$)")
+MESSAGES = re.compile(r"\b(?:any|my|new|read|check|play)\b.{0,20}\bmessages?\b|\bmessages? for me\b")
+CHAT = re.compile(r"\b(let'?s (?:chat|talk)|talk (?:to|with) me|chat with me|i'?m bored|keep me company|tell me a story)\b")
 CLOCK = re.compile(r"\b(what(?:'?s| is) the time|what time is it|time (?:is it )?(?:right )?now|what(?:'?s| is) (?:the )?(?:date|day) today|what day is (?:it|today))\b")
 TOOK = re.compile(r"\b(i (?:just )?took|i'?ve (?:just )?taken|i have taken|just had my)\b")
 SCHEDULE = re.compile(r"\b(pills?|medicines?|medications?|meds|tablets?|dose|what'?s next)\b")
@@ -172,6 +182,14 @@ def route(text: str, meds: list[dict], caregiver: str) -> tuple[str, dict] | Non
     if (n := NOTIFY.search(t)) and n.group(1) in {caregiver.lower(), "family", "my"}:
         body = text[n.start(2):].strip(" .") if n.group(2) else text
         return "notify_caregiver", {"message": body[:1].upper() + body[1:] if body else text}
+    if MESSAGES.search(t) and not re.search(r"\b(send|tell)\b", t):
+        return "get_family_messages", {}
+    if (m := INTERACT.search(t)) and (medicine := (m[1] or m[2] or "").strip()) and medicine not in {"it", "them", "this", "that"}:
+        own = any(x["name"].lower() in medicine for x in meds)
+        if not own or " with " in t:
+            return "check_medicine_interactions", {"medicine": medicine}
+    if CHAT.search(t):
+        return "start_conversation", {}
     if REFILL.search(t):
         return "request_pharmacy_refill", {"medication": text, "fulfillment": "delivery" if "deliver" in t else "pickup"}
     if rule_assess(t)[2] >= 2 or (CALLED.search(t) and contacts.numbers_in(t)):
@@ -409,7 +427,7 @@ class VoiceSession:
             done = await asyncio.gather(*(self._tool_result(u) for u in uses))
             self.history.append({"role": "user", "content": [result for result, _ in done]})
             spoken = [call.spoken for _, call in done]
-            if all(spoken) and self.language == "en":  # tool replies are English
+            if all(spoken) and self.language == "en" and not CONVERSATIONAL & {u.name for u in uses}:  # tool replies are English
                 # Every tool returns a spoken reply built from the real data, so the model's second call
                 # (half the time and tokens of a care question) is skipped. It also can't misstate doses
                 # or claim actions it didn't take.

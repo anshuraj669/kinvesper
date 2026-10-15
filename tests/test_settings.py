@@ -100,7 +100,9 @@ async def test_medicines_are_edited_and_retired(service):
     assert set(names) == {meds[0]["name"], "Vitamin D"}
     assert names[meds[0]["name"]]["times"] == ["09:00", "21:00"] and names[meds[0]["name"]]["id"] == meds[0]["id"]
     assert service.find_medication("my bones pill").name == "Vitamin D"
-    assert len(service.schedule().items) == 3  # the retired medicines are off the schedule, history kept
+    vitamin = service.find_medication("Vitamin D")
+    expected = 3 if vitamin.added_at[11:16] <= "12:00" else 2  # added after noon: its first dose is tomorrow
+    assert len(service.schedule().items) == expected  # the retired medicines are off the schedule, history kept
 
 
 @pytest.mark.parametrize("profile, meds, error", [

@@ -6,7 +6,9 @@ Alexa+ add-ons reach /mcp directly, but that tooling is allowlisted. Until then 
 ("Alexa, open kin vesper") hands each phrase to the same voice agent as the simulator, which calls
 the same MCP tools. A catch-all slot carries the whole utterance; Yes/No answer Kinvesper's
 confirmation questions; Stop and Cancel end the conversation. "Set up my pill reminders" asks for the
-reminders permission by voice and has the Echo itself remind the person at every dose time.
+reminders permission by voice and has the Echo itself remind the person at every dose time. On an Echo
+Show every reply also shows today's medicines, with a "Taken" button for each dose that's due. When the
+skill opens, family messages sent from the dashboard are read out first.
 
 Every request is checked as Amazon requires for an HTTPS endpoint: the signing certificate chain
 (from Amazon's S3 bucket, issued to echo-api.amazon.com, trusted root), the SHA-256 signature of the
@@ -34,7 +36,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from . import llm
+from . import apl, llm
 from .config import settings
 from .i18n import lang, t
 from .reminders import SCOPE, TIMER_SCOPE, EchoReminders, spoken_times
@@ -175,6 +177,19 @@ class AlexaBridge:
             await self.sessions.close(sid)
 
     async def handle(self, body: dict) -> dict:
+        reply = await self._handle(body)
+        response = reply.get("response")
+        if (response is not None and self.service and apl.supports_screen(body)
+                and not any(d.get("type") == "Connections.SendRequest" for d in response.get("directives", []))):
+            try:
+                said = (response.get("outputSpeech") or {}).get("text", "")
+                response.setdefault("directives", []).append(
+                    apl.screen(self.service.schedule(), self.service.profile().preferred_name, said if len(said) < 140 else ""))
+            except Exception:
+                log.exception("Couldn't draw the Echo Show screen")
+        return reply
+
+    async def _handle(self, body: dict) -> dict:
         request = body.get("request") or {}
         kind = request.get("type", "")
         alexa_id = (body.get("session") or {}).get("sessionId", "")
@@ -189,6 +204,15 @@ class AlexaBridge:
         if kind == "SessionEndedRequest":
             await self._end(alexa_id)
             return {"version": "1.0", "response": {}}
+        if kind == "Alexa.Presentation.APL.UserEvent" and self.service:  # "Taken" touched on the Echo Show
+            args = request.get("arguments") or []
+            if len(args) >= 2 and args[0] == "taken":
+                self.service.touch_activity()
+                result = self.service.log_dose(str(args[1]), source="screen")
+                if result.status == "already_taken":
+                    await self.service.note_repeat("double_dose")
+                return speak(result.message, end=False, reprompt=t(locale, "reprompt"))
+            return say("cant_do")
         if kind == "Connections.Response" and request.get("name") == "AskFor":
             scopes = (request.get("payload") or {}).get("permissionScopes") or [{}]
             accepted = any(s.get("status") == "ACCEPTED" and s.get("permissionScope", SCOPE) == SCOPE for s in scopes)
@@ -205,7 +229,13 @@ class AlexaBridge:
         anything = t(locale, "anything") if llm.enabled() else ""
         if kind == "LaunchRequest":
             self._refresh_reminders(system, locale)
-            return say("welcome", name=session.patient, caregiver=session.caregiver, anything=anything)
+            welcome = t(locale, "welcome", name=session.patient, caregiver=session.caregiver, anything=anything)
+            if self.service and self.service.family_messages(unheard_only=True):
+                news = self.service.take_family_messages().messages
+                said = " ".join(t(locale, "family_message", name=session.patient, sender=m.sender, text=m.text) for m in news)
+                session.notes.append(f"They just heard these family messages: {said}")
+                welcome = f"{said} {t(locale, 'reprompt')}"
+            return speak(welcome, end=False, reprompt=t(locale, "reprompt"))
         if kind != "IntentRequest":
             return say("cant_do")
 

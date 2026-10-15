@@ -7,7 +7,9 @@ rule-based logic and the voice simulator uses a keyword router.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from typing import Any
 
 import anthropic
@@ -95,3 +97,32 @@ async def complete(system: str, prompt: str, max_tokens: int = 2048) -> str | No
     except anthropic.APIError as e:
         log.warning("LLM call failed: %s", e)
         return None
+
+
+async def structured(system: str, content: str | list, schema: dict, max_tokens: int = 2048) -> dict | None:
+    """One call whose reply is JSON matching `schema` (Claude's structured outputs; a local model is asked
+    for JSON and parsed). `content` is the user turn: text, or content blocks such as an image.
+    Returns None when the LLM is off or the call fails."""
+    if not enabled():
+        return None
+    params: dict[str, Any] = {"system": system, "max_tokens": max_tokens, "messages": [{"role": "user", "content": content}]}
+    if not local():
+        params["output_config"] = {"effort": settings.llm_effort, "format": {"type": "json_schema", "schema": schema}}
+    try:
+        response = await create_message(**params)
+    except anthropic.APIError as e:
+        log.warning("LLM call failed: %s", e)
+        return None
+    if response.stop_reason in ("refusal", "max_tokens"):
+        return None
+    text = text_of(response)
+    try:
+        return json.loads(text)
+    except ValueError:
+        if match := re.search(r"\{.*\}", text, re.S):
+            try:
+                return json.loads(match[0])
+            except ValueError:
+                pass
+    log.warning("LLM reply wasn't JSON: %.200s", text)
+    return None

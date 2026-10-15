@@ -60,6 +60,9 @@ class Settings:
     # Starting contact for a freshly seeded household (then edited in Settings).
     caregiver_sms: str = field(default_factory=lambda: _env("CAREGIVER_SMS"))
     caregiver_email: str = field(default_factory=lambda: _env("CAREGIVER_EMAIL"))
+    # Spoken phone calls for urgent alerts (AWS End User Messaging SMS and Voice): the voice-capable
+    # number or pool ID calls come from. Empty = no calls, only texts and email.
+    voice_call_from: str = field(default_factory=lambda: _env("VOICE_CALL_FROM"))
 
     # OAuth (Cognito) for the MCP endpoint. Empty issuer = auth disabled (local dev).
     oauth_issuer: str = field(default_factory=lambda: _env("OAUTH_ISSUER"))
@@ -79,6 +82,9 @@ class Settings:
     missed_dose_grace_min: int = field(default_factory=lambda: int(_env("MISSED_DOSE_GRACE_MIN", "60")))
     inactivity_hours: float = field(default_factory=lambda: float(_env("INACTIVITY_HOURS", "4")))
     escalate_after_min: int = field(default_factory=lambda: int(_env("ESCALATE_AFTER_MIN", "10")))
+    call_after_min: int = field(default_factory=lambda: int(_env("CALL_AFTER_MIN", "5")))  # unacknowledged urgent -> phone call
+    checkin_grace_min: int = field(default_factory=lambda: int(_env("CHECKIN_GRACE_MIN", "60")))
+    repeat_threshold: int = field(default_factory=lambda: int(_env("REPEAT_THRESHOLD", "4")))  # same question, same day
     report_day: str = field(default_factory=lambda: _env("REPORT_DAY", "sunday").lower())  # weekly family email
     report_time: str = field(default_factory=lambda: _env("REPORT_TIME", "18:00"))
     low_stock_threshold: int = field(default_factory=lambda: int(_env("LOW_STOCK_THRESHOLD", "5")))

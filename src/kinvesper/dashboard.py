@@ -2,6 +2,7 @@
 
     GET  /dashboard                  the dashboard page
     GET  /dashboard/settings         the settings page: the person, the caregiver's contact, the medicines
+    GET  /dashboard/doctor           a printable summary for the next doctor's visit
     GET  /api/dashboard              everything the page shows, in one call
     GET  /api/settings               the household's settings
     PUT  /api/settings               save them ({"profile": {...}, "medications": [...], "contacts": [...]})
@@ -10,6 +11,11 @@
     POST /api/alerts/{id}/ack        acknowledge an alert
     POST /api/reminders/{id}/cancel  cancel a reminder or alarm (the Echo drops it the next time it's used)
     POST /api/checks                 run the proactive checks now (demo button)
+    POST /api/ask                    ask Kinvesper about the person ({"question", "history": [{"q", "a"}]})
+    POST /api/messages               send the person a message, read out on the Echo ({"text"})
+    GET  /api/reports/doctor         the doctor visit summary (?days=30)
+    POST /api/medications/scan       a photo of a prescription (the image as the body) -> medicines to review
+    POST /api/medications/interactions  check medicines just added ({"medicines": [names]}) for interactions
 
 Health data, so with OAuth on the dashboard needs DASHBOARD_KEY (open /dashboard?key=...) and is
 off without it. With OAuth off (local dev) it is open.
@@ -25,15 +31,18 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from .config import settings
+from .models import ScanResult
 from .scheduler import check_once
 from .service import CareService, SettingsError
 
 OFF = "The caregiver dashboard is off: with OAuth on it needs DASHBOARD_KEY."
+MAX_PHOTO_BYTES = 5 * 1024 * 1024  # Claude's limit for one image
 
 
 def dashboard_routes(service: CareService) -> list[Route]:
     page = files("kinvesper").joinpath("static/dashboard.html").read_text()
     settings_page = files("kinvesper").joinpath("static/settings.html").read_text()
+    doctor_page = files("kinvesper").joinpath("static/doctor.html").read_text()
 
     def guard(request: Request) -> Response | None:
         if not settings.oauth_issuer:
@@ -54,6 +63,67 @@ def dashboard_routes(service: CareService) -> list[Route]:
 
     async def settings_html(_: Request) -> Response:
         return html(settings_page)
+
+    async def doctor_html(_: Request) -> Response:
+        return html(doctor_page)
+
+    async def json_body(request: Request) -> dict:
+        try:
+            body = await request.json()
+        except ValueError:
+            return {}
+        return body if isinstance(body, dict) else {}
+
+    async def ask(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        body = await json_body(request)
+        question = str(body.get("question") or "").strip()
+        if not question:
+            return JSONResponse({"error": "Ask a question first"}, status_code=400)
+        history = body.get("history") if isinstance(body.get("history"), list) else []
+        return JSONResponse({"answer": await service.ask(question, [h for h in history if isinstance(h, dict)])})
+
+    async def message(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        try:
+            sent = service.send_family_message(str((await json_body(request)).get("text") or ""))
+        except SettingsError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse(sent.model_dump())
+
+    async def doctor_report(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        try:
+            days = max(7, min(90, int(request.query_params.get("days", "30"))))
+        except ValueError:
+            days = 30
+        return JSONResponse(await service.doctor_report(days))
+
+    async def scan(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        image = await request.body()
+        if not image:
+            return JSONResponse({"error": "No photo received"}, status_code=400)
+        if len(image) > MAX_PHOTO_BYTES:
+            return JSONResponse({"error": "That photo is too large. Please use one under 5 MB."}, status_code=413)
+        media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        try:
+            result: ScanResult = await service.scan_prescription(image, media_type)
+        except SettingsError as e:
+            return JSONResponse({"error": str(e)}, status_code=422)
+        return JSONResponse(result.model_dump())
+
+    async def check_interactions(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        names = (await json_body(request)).get("medicines")
+        if not isinstance(names, list) or not names:
+            return JSONResponse({"error": "Send the medicines to check"}, status_code=400)
+        return JSONResponse((await service.check_new_medicines([str(n) for n in names][:10])).model_dump())
 
     async def household(request: Request) -> Response:
         if denied := guard(request):
@@ -112,6 +182,7 @@ def dashboard_routes(service: CareService) -> list[Route]:
     return [
         Route("/dashboard", dashboard_page),
         Route("/dashboard/settings", settings_html),
+        Route("/dashboard/doctor", doctor_html),
         Route("/api/dashboard", data),
         Route("/api/settings", household, methods=["GET", "PUT"]),
         Route("/api/settings/test-alert", test_alert, methods=["POST"]),
@@ -119,4 +190,9 @@ def dashboard_routes(service: CareService) -> list[Route]:
         Route("/api/alerts/{alert_id}/ack", ack, methods=["POST"]),
         Route("/api/checks", checks, methods=["POST"]),
         Route("/api/reminders/{reminder_id}/cancel", cancel_reminder, methods=["POST"]),
+        Route("/api/ask", ask, methods=["POST"]),
+        Route("/api/messages", message, methods=["POST"]),
+        Route("/api/reports/doctor", doctor_report),
+        Route("/api/medications/scan", scan, methods=["POST"]),
+        Route("/api/medications/interactions", check_interactions, methods=["POST"]),
     ]

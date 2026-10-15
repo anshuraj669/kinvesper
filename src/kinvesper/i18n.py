@@ -37,6 +37,8 @@ TEXT = {
         "heads_up": "{name}, in 30 minutes it'll be time {action}.",
         "reminder_saved": "Thank you. Your reminder is set on this Echo.",
         "reminder_not_on_echo": "Okay. I've saved the reminder, but without permission this Echo can't ring for it.",
+        "checkin_prompt": "Hello {name}, it's Kinvesper checking in. Please let me know you're okay. Just say: Alexa, tell kin vesper I'm fine.",
+        "family_message": "{name}, you have a message from {sender}: {text}",
     },
     "hi": {
         "welcome": ("नमस्ते {name}, मैं Kinvesper हूँ। आप अपनी दवाइयों के बारे में पूछ सकते हैं, बता सकते हैं कि दवाई ले ली, "
@@ -66,6 +68,8 @@ TEXT = {
         "heads_up": "{name}, 30 मिनट में: {text}।",
         "reminder_saved": "धन्यवाद। आपका रिमाइंडर इस Echo पर सेट हो गया है।",
         "reminder_not_on_echo": "ठीक है। मैंने रिमाइंडर सेव कर लिया है, पर अनुमति के बिना यह Echo उसके लिए नहीं बजेगा।",
+        "checkin_prompt": "नमस्ते {name}, Kinvesper आपका हाल पूछ रहा है। बस कहिए: Alexa, kin vesper से कहो मैं ठीक हूँ।",
+        "family_message": "{name}, {sender} का संदेश आया है: {text}",
     },
 }
 

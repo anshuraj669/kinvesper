@@ -44,6 +44,7 @@ class KinvesperStack(cdk.Stack):
         callback_urls: list[str] | None = None,
         alexa_vendor_id: str = "",
         alexa_skill_id: str = "",
+        voice_call_from: str = "",
         retain_data: bool = True,
         **kwargs,
     ) -> None:
@@ -156,6 +157,11 @@ class KinvesperStack(cdk.Stack):
         for s in secrets.values():
             s.grant_read(instance_role)
         instance_role.add_to_policy(iam.PolicyStatement(
+            sid="UrgentAlertCalls",  # spoken phone calls to the caregiver (AWS End User Messaging SMS and Voice)
+            actions=["sms-voice:SendVoiceMessage"],
+            resources=["*"],
+        ))
+        instance_role.add_to_policy(iam.PolicyStatement(
             sid="VoiceSimulatorSpeech",  # Amazon Transcribe hears the voice simulator, Amazon Polly speaks its replies
             actions=["transcribe:StartStreamTranscription", "polly:SynthesizeSpeech"],
             resources=["*"],
@@ -185,6 +191,8 @@ class KinvesperStack(cdk.Stack):
             env["PUBLIC_URL"] = public_url.rstrip("/")
         if alexa_skill_id:
             env["ALEXA_SKILL_ID"] = alexa_skill_id  # turns on the classic skill bridge at /alexa
+        if voice_call_from:
+            env["VOICE_CALL_FROM"] = voice_call_from  # a voice-capable number: urgent alerts ring the caregiver
         if llm_provider == "bedrock" or (llm_provider == "anthropic" and not llm_model.startswith("anthropic.")):
             env["LLM_MODEL"] = llm_model
         else:
