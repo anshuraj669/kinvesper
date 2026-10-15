@@ -63,6 +63,12 @@ class Settings:
     # Spoken phone calls for urgent alerts (AWS End User Messaging SMS and Voice): the voice-capable
     # number or pool ID calls come from. Empty = no calls, only texts and email.
     voice_call_from: str = field(default_factory=lambda: _env("VOICE_CALL_FROM"))
+    # Or through Twilio (a free trial works for verified numbers): the account SID, auth token and the
+    # Twilio number calls come from, separately or together as TWILIO_CREDENTIALS="AC...:token:+1...".
+    twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
+    twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
+    twilio_from: str = field(default_factory=lambda: _env("TWILIO_FROM"))
+    twilio_credentials: str = field(default_factory=lambda: _env("TWILIO_CREDENTIALS"))
 
     # OAuth (Cognito) for the MCP endpoint. Empty issuer = auth disabled (local dev).
     oauth_issuer: str = field(default_factory=lambda: _env("OAUTH_ISSUER"))

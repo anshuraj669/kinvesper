@@ -1,7 +1,8 @@
 """Caregiver notifications over Amazon SNS, to the contact saved in the profile. Falls back to logging.
 
-- Urgent alerts also ring the caregiver's phone: a spoken call (AWS End User Messaging SMS and Voice,
-  SendVoiceMessage) from the voice-capable number in VOICE_CALL_FROM. Without one, no calls.
+- Urgent alerts also ring the caregiver's phone: a spoken call through Twilio (TWILIO_*; pressing 1
+  acknowledges the alert), or AWS End User Messaging SMS and Voice (VOICE_CALL_FROM, one-way). With
+  neither, no calls.
 
 - Phone: a text straight to the number (sns.publish PhoneNumber=...). A new AWS account's SMS sandbox
   only delivers to verified numbers.
@@ -14,11 +15,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import re
 from typing import Literal
 from xml.sax.saxutils import escape
+
+import httpx
 
 from .config import settings
 
@@ -110,7 +116,55 @@ async def email_status(email: str) -> EmailStatus:
     return "pending" if mine else "not_subscribed"
 
 
-def _call(phone: str, text: str) -> None:
+TWILIO_API = "https://api.twilio.com/2010-04-01"
+VOICE = "Polly.Joanna"  # Twilio speaks with Amazon Polly voices too
+_twilio_transport: httpx.AsyncBaseTransport | None = None  # tests swap in a fake Twilio
+
+
+def twilio() -> tuple[str, str, str] | None:
+    """(account SID, auth token, from number) when Twilio is set up."""
+    sid, token, sender = settings.twilio_account_sid, settings.twilio_auth_token, settings.twilio_from
+    if settings.twilio_credentials.count(":") >= 2:
+        sid, token, sender = (x.strip() for x in settings.twilio_credentials.split(":", 2))
+    return (sid, token, sender) if sid.startswith("AC") and token and PHONE.match(sender) else None
+
+
+def calls_enabled() -> bool:
+    return bool(twilio() or settings.voice_call_from)
+
+
+def twiml(text: str, ack_url: str = "") -> str:
+    """What the call says: the alert, then (with an acknowledge link) "press 1", then the alert again."""
+    say = f'<Say voice="{VOICE}">{escape(text)}</Say>'
+    if not ack_url:
+        return f'<Response>{say}<Pause length="1"/><Say voice="{VOICE}">Again:</Say>{say}</Response>'
+    ask = f'<Say voice="{VOICE}">Press 1 to let Kinvesper know you are on it.</Say>'
+    return (f'<Response><Gather numDigits="1" timeout="8" method="POST" action="{escape(ack_url)}">{say}{ask}</Gather>'
+            f'<Gather numDigits="1" timeout="8" method="POST" action="{escape(ack_url)}"><Say voice="{VOICE}">Again:</Say>{say}{ask}</Gather>'
+            f'<Say voice="{VOICE}">Goodbye.</Say></Response>')
+
+
+def twilio_signature_ok(url: str, params: dict[str, str], signature: str) -> bool:
+    """Twilio signs each request: base64 HMAC-SHA1, keyed by the auth token, of the URL followed by the
+    POST parameters sorted by name (each name then its value)."""
+    creds = twilio()
+    if not creds or not signature:
+        return False
+    data = url + "".join(k + params[k] for k in sorted(params))
+    expected = base64.b64encode(hmac.new(creds[1].encode(), data.encode(), hashlib.sha1).digest()).decode()
+    return hmac.compare_digest(expected, signature)
+
+
+async def _twilio_call(phone: str, text: str, ack_url: str) -> None:
+    sid, token, sender = twilio()
+    async with httpx.AsyncClient(timeout=10, auth=(sid, token), transport=_twilio_transport) as http:
+        r = await http.post(f"{TWILIO_API}/Accounts/{sid}/Calls.json",
+                            data={"To": phone, "From": sender, "Twiml": twiml(text, ack_url)})
+    if r.status_code >= 300:  # e.g. a trial account calling a number that isn't verified
+        raise RuntimeError(f"Twilio {r.status_code}: {r.json().get('message', r.text[:200]) if r.content else ''}")
+
+
+def _aws_call(phone: str, text: str) -> None:
     import boto3
 
     ssml = f'<speak>{escape(text)}<break time="1s"/>Again: {escape(text)}</speak>'  # said twice: people miss the start
@@ -119,18 +173,17 @@ def _call(phone: str, text: str) -> None:
         MessageBody=ssml, MessageBodyTextType="SSML", VoiceId="JOANNA")
 
 
-def calls_enabled() -> bool:
-    return bool(settings.voice_call_from)
-
-
-async def call(phone: str, text: str) -> bool:
-    """Ring `phone` and read `text` aloud. Returns True when the call was placed."""
+async def call(phone: str, text: str, ack_url: str = "") -> bool:
+    """Ring `phone` and read `text` aloud (with Twilio, pressing 1 posts to `ack_url`). True when placed."""
     if not phone or not calls_enabled():
-        log.info("[call skipped: %s] %s", "no number to call" if not phone else "VOICE_CALL_FROM not set", text)
+        log.info("[call skipped: %s] %s", "no number to call" if not phone else "no calling service set up", text)
         return False
     try:
-        await asyncio.to_thread(_call, phone, text)
+        if twilio():
+            await _twilio_call(phone, text, ack_url)
+        else:
+            await asyncio.to_thread(_aws_call, phone, text)
         return True
-    except Exception as e:  # e.g. a destination not verified in the sandbox: the text and email still went
-        log.warning("Phone call to %s failed: %s", phone[-4:], e)
+    except Exception as e:  # e.g. a destination not verified in the trial or sandbox: the text and email still went
+        log.warning("Phone call to ...%s failed: %s", phone[-4:], e)
         return False

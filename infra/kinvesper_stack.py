@@ -123,7 +123,11 @@ class KinvesperStack(cdk.Stack):
         service_token = secret("ServiceToken", "bearer token for the built-in voice simulator")
         simulator_key = secret("SimulatorKey", "voice simulator access key (/voice?key=...)")
         dashboard_key = secret("DashboardKey", "caregiver dashboard access key (/dashboard?key=...)")
-        secrets = {"SERVICE_TOKEN": service_token, "SIMULATOR_KEY": simulator_key, "DASHBOARD_KEY": dashboard_key}
+        # Twilio for urgent-alert phone calls: "AC...:auth token:+1..." (scripts/set_twilio.sh). Until then it's a
+        # random placeholder, and Kinvesper makes no calls.
+        twilio = secret("TwilioCredentials", "Twilio account SID, auth token and number for alert calls (scripts/set_twilio.sh)")
+        secrets = {"SERVICE_TOKEN": service_token, "SIMULATOR_KEY": simulator_key, "DASHBOARD_KEY": dashboard_key,
+                   "TWILIO_CREDENTIALS": twilio}
         claude_key = None
         if llm_provider == "anthropic":
             # Starts as a placeholder (the voice agent falls back to its keyword router until the key
@@ -270,6 +274,7 @@ class KinvesperStack(cdk.Stack):
         out("SimulatorKeySecret", simulator_key.secret_arn, "aws secretsmanager get-secret-value --secret-id <arn>")
         out("DashboardKeySecret", dashboard_key.secret_arn, "aws secretsmanager get-secret-value --secret-id <arn>")
         out("ServiceTokenSecret", service_token.secret_arn, "Bearer token that skips OAuth (simulators)")
+        out("TwilioSecret", twilio.secret_arn, "Twilio credentials for alert calls: set with scripts/set_twilio.sh")
         if claude_key:
             out("ClaudeApiKeySecret", claude_key.secret_arn, "Set with scripts/set_claude_key.sh")
         out("OAuthIssuer", issuer, "Cognito issuer")

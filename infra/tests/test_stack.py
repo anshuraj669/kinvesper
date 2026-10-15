@@ -49,7 +49,7 @@ def test_cloud_configuration(template):
 
 def test_secrets_never_plaintext(template):
     secrets = _env(template, "RuntimeEnvironmentSecrets")
-    assert set(secrets) == {"SERVICE_TOKEN", "SIMULATOR_KEY", "DASHBOARD_KEY"}
+    assert set(secrets) == {"SERVICE_TOKEN", "SIMULATOR_KEY", "DASHBOARD_KEY", "TWILIO_CREDENTIALS"}
     assert all("Ref" in v for v in secrets.values())  # secret ARNs, resolved by App Runner
     assert "SERVICE_TOKEN" not in _env(template)
 
@@ -182,3 +182,8 @@ def test_skill_bridge_only_with_skill_id(template):
 def test_phone_calls_only_with_a_calling_number(template):
     assert "VOICE_CALL_FROM" not in _env(template)
     assert _env(synth(voice_call_from="+18005550100"))["VOICE_CALL_FROM"] == "+18005550100"
+
+
+def test_twilio_credentials_come_from_secrets_manager(template):
+    secrets = _env(template, "RuntimeEnvironmentSecrets")
+    assert "TWILIO_CREDENTIALS" in secrets and "TWILIO_CREDENTIALS" not in _env(template)

@@ -59,7 +59,7 @@ def clock(monkeypatch):
 def calls(monkeypatch):
     placed = []
 
-    async def call(phone, text):
+    async def call(phone, text, ack_url=""):
         placed.append((phone, text))
         return True
 
@@ -373,3 +373,74 @@ async def test_new_medicine_isnt_missed_before_it_was_added(service, clock):
     titles = [a.title for a in service.alerts() if a.kind == "missed_dose"]
     assert "Margaret missed the 8 PM Vitamin D" in titles and "Margaret missed the 8 AM Vitamin D" not in titles
     assert not any("Vitamin D" in m for m in service._missed_labels(7) if not m.endswith("8 PM Vitamin D"))
+
+
+# ---------- Twilio phone calls ----------
+
+SID, TOKEN = "AC" + "1" * 32, "f" * 32
+
+
+@pytest.fixture
+def twilio(monkeypatch):
+    """Twilio set up, with its REST API in memory."""
+    import dataclasses
+    import json as _json  # noqa: F401
+    from urllib.parse import parse_qs
+
+    placed = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == f"/2010-04-01/Accounts/{SID}/Calls.json"
+        placed.append({k: v[0] for k, v in parse_qs(request.content.decode()).items()})
+        return httpx.Response(201, json={"sid": "CA123", "status": "queued"})
+
+    config = dataclasses.replace(notify.settings, twilio_credentials=f"{SID}:{TOKEN}:+15005550006",
+                                 public_url="https://kinvesper.example.com")
+    monkeypatch.setattr(notify, "settings", config)
+    monkeypatch.setattr(service_module, "settings", config)
+    monkeypatch.setattr("kinvesper.dashboard.settings", config)
+    monkeypatch.setattr(notify, "_twilio_transport", httpx.MockTransport(api))
+    return placed
+
+
+def _sign(url: str, params: dict) -> str:
+    import base64
+    import hashlib
+    import hmac
+    data = url + "".join(k + params[k] for k in sorted(params))
+    return base64.b64encode(hmac.new(TOKEN.encode(), data.encode(), hashlib.sha1).digest()).decode()
+
+
+async def test_twilio_call_reads_the_alert_and_offers_press_1(service, twilio):
+    p = service.profile()
+    p.caregiver_phone = "+919811112222"
+    service.store.save("profile", p, id="main")
+    result = await service.emergency("I fell in the kitchen")
+    call = twilio[0]
+    assert call["To"] == "+919811112222" and call["From"] == "+15005550006"
+    assert "I fell in the kitchen" in call["Twiml"] and "Press 1" in call["Twiml"]
+    assert f'action="https://kinvesper.example.com/api/calls/{result.alert_id}/ack"' in call["Twiml"]
+    assert notify.calls_enabled()
+
+
+def test_press_1_acknowledges_only_when_signed_by_twilio(service, twilio):
+    from starlette.testclient import TestClient
+
+    from kinvesper.dashboard import dashboard_routes
+    from starlette.applications import Starlette
+
+    alert = __import__("asyncio").run(service.raise_alert("urgent", "emergency", "EMERGENCY", "fell", sms=False))
+    client = TestClient(Starlette(routes=dashboard_routes(service)))
+    path = f"/api/calls/{alert.id}/ack"
+    params = {"Digits": "1", "CallSid": "CA123"}
+    forged = client.post(path, data=params, headers={"X-Twilio-Signature": "nope"})
+    assert forged.status_code == 403 and not service.store.load("alert", alert.id, service_module.Alert).acknowledged
+    signed = client.post(path, data=params, headers={"X-Twilio-Signature": _sign(f"https://kinvesper.example.com{path}", params)})
+    assert signed.status_code == 200 and "marked as handled" in signed.text
+    assert service.store.load("alert", alert.id, service_module.Alert).acknowledged
+
+
+async def test_twilio_trial_refusal_is_not_fatal(service, twilio, monkeypatch):
+    monkeypatch.setattr(notify, "_twilio_transport", httpx.MockTransport(
+        lambda r: httpx.Response(400, json={"message": "The number is unverified. Trial accounts may only make calls to verified numbers."})))
+    assert not await notify.call("+919811112222", "hello")

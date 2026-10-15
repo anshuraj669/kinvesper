@@ -16,6 +16,7 @@
     GET  /api/reports/doctor         the doctor visit summary (?days=30)
     POST /api/medications/scan       a photo of a prescription (the image as the body) -> medicines to review
     POST /api/medications/interactions  check medicines just added ({"medicines": [names]}) for interactions
+    POST /api/calls/{id}/ack         Twilio, when the caregiver presses 1 on an alert call (signed by Twilio)
 
 Health data, so with OAuth on the dashboard needs DASHBOARD_KEY (open /dashboard?key=...) and is
 off without it. With OAuth off (local dev) it is open.
@@ -30,6 +31,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
+from . import notify
 from .config import settings
 from .models import ScanResult
 from .scheduler import check_once
@@ -117,6 +119,19 @@ def dashboard_routes(service: CareService) -> list[Route]:
             return JSONResponse({"error": str(e)}, status_code=422)
         return JSONResponse(result.model_dump())
 
+    async def call_ack(request: Request) -> Response:
+        """The caregiver pressed a key on an alert call. Twilio's signature stands in for the dashboard key."""
+        form = {k: str(v) for k, v in (await request.form()).items()}
+        url = f"{settings.public_url.rstrip('/')}{request.url.path}"
+        if not notify.twilio_signature_ok(url, form, request.headers.get("x-twilio-signature", "")):
+            return Response(status_code=403)
+        alert = service.acknowledge(request.path_params["alert_id"]) if form.get("Digits") == "1" else None
+        p = service.profile()
+        said = (f"Thank you. The alert is marked as handled. Please check on {p.preferred_name}." if alert
+                else "Okay. The alert is still open in the Kinvesper dashboard. Goodbye.")
+        return Response(f'<Response><Say voice="{notify.VOICE}">{notify.escape(said)}</Say></Response>',
+                        media_type="application/xml")
+
     async def check_interactions(request: Request) -> Response:
         if denied := guard(request):
             return denied
@@ -195,4 +210,5 @@ def dashboard_routes(service: CareService) -> list[Route]:
         Route("/api/reports/doctor", doctor_report),
         Route("/api/medications/scan", scan, methods=["POST"]),
         Route("/api/medications/interactions", check_interactions, methods=["POST"]),
+        Route("/api/calls/{alert_id}/ack", call_ack, methods=["POST"]),
     ]

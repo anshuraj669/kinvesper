@@ -808,7 +808,7 @@ class CareService:
                 f"{p.caregiver_name} for {minutes} minutes:\n\n{a.title}\n{a.detail}\n\n"
                 f"Please check on {p.preferred_name} or reach {p.caregiver_name}.",
                 phone=p.backup_phone, audience="backup")
-            await notify.call(p.backup_phone, self._call_text(a, p, f"{p.caregiver_name} hasn't answered it."))
+            await notify.call(p.backup_phone, self._call_text(a, p, f"{p.caregiver_name} hasn't answered it."), self._ack_url(a))
             a.escalated_at = current.isoformat()
             self.store.save("alert", a)
 
@@ -816,15 +816,19 @@ class CareService:
     def _call_text(a: Alert, p: Profile, extra: str = "") -> str:
         detail = a.detail.split("\n")[0].strip()
         return (f"This is Kinvesper, with an urgent alert about {p.patient_name}. {a.title.rstrip('.')}. "
-                f"{detail + '. ' if detail else ''}{extra + ' ' if extra else ''}Please check on {p.preferred_name} now, "
-                "then acknowledge the alert in the Kinvesper dashboard.")
+                f"{detail.rstrip('.') + '. ' if detail else ''}{extra + ' ' if extra else ''}Please check on {p.preferred_name} now.")
+
+    @staticmethod
+    def _ack_url(a: Alert) -> str:
+        """Where "press 1" on the call goes (needs the server's public address)."""
+        return f"{settings.public_url.rstrip('/')}/api/calls/{a.id}/ack" if settings.public_url.startswith("https://") else ""
 
     async def _ring(self, a: Alert) -> None:
         """Call the caregiver about an urgent alert, once."""
         p = self.profile()
         if a.called_at or not p.caregiver_phone:
             return
-        if await notify.call(p.caregiver_phone, self._call_text(a, p)):
+        if await notify.call(p.caregiver_phone, self._call_text(a, p), self._ack_url(a)):
             a.called_at = now().isoformat()
             self.store.save("alert", a)
 

@@ -1,4 +1,4 @@
-.PHONY: help dev dev-aws test seed login claude-key
+.PHONY: help dev dev-aws test seed login claude-key twilio
 
 help:  ## List the commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -20,3 +20,6 @@ login:  ## Create the Alexa account-linking login: make login EMAIL=you@example.
 
 claude-key:  ## Store the Claude API key for the deployed voice agent (deploy with -c llmProvider=anthropic)
 	@./scripts/set_claude_key.sh
+
+twilio:  ## Store the Twilio credentials for urgent-alert phone calls (from .env, or asks)
+	@./scripts/set_twilio.sh

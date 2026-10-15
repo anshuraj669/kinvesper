@@ -51,7 +51,7 @@ flowchart LR
 | Compute | App Runner (one container: MCP server, Alexa bridge, voice agent, dashboard) |
 | Data | DynamoDB (one table), Secrets Manager (keys and tokens) |
 | Identity | Cognito (OAuth 2.1 for `/mcp` and Alexa+ account linking) |
-| Alerts | SNS (SMS to the phone, email to the caregiver and the backup contact), End User Messaging (spoken phone calls for urgent alerts) |
+| Alerts | SNS (SMS to the phone, email to the caregiver and the backup contact), Twilio or End User Messaging (spoken phone calls for urgent alerts) |
 | Schedules | EventBridge (proactive checks every 5 minutes) |
 | Speech (simulator) | Transcribe (speech to text), Polly (text to speech) |
 | Ops | CloudWatch (logs, a 5xx alarm), ECR (the image) |
@@ -195,6 +195,13 @@ Settings also holds:
   check before saving. New medicines are checked for interactions with the rest.
 - **A daily "I'm okay" check-in** time: the Echo asks, and silence tells the family.
 
+**Phone calls for urgent alerts** go through Twilio (a free trial is enough: it calls the numbers
+verified in the Twilio console). Put `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_FROM` in
+`.env` and run `make twilio`, which stores them in Secrets Manager and restarts the service. The call
+reads the alert out and asks the caregiver to press 1, which acknowledges it on the dashboard
+(Twilio signs that request, and the server checks the signature). `VOICE_CALL_FROM` uses AWS End
+User Messaging instead, once the account's voice spending limit is raised.
+
 The dashboard also has **Ask Kinvesper** (Claude answers questions about the last two weeks from the
 care data, and says so when it doesn't track something), **Send a message** (read out on the Echo
 next time, with "heard" shown), **Memories** from companionship chats, and a printable **Doctor
@@ -213,7 +220,7 @@ calls it every 5 minutes):
 | `REPORT_DAY` after `REPORT_TIME` (Sunday 18:00): the weekly report, written by Claude | info | email |
 | An important alarm comes due | warning | yes |
 | Nothing heard `CHECKIN_GRACE_MIN` after the daily check-in time | warning | yes |
-| Urgent alert unacknowledged for `CALL_AFTER_MIN` (an emergency: at once) | phone call | yes, if `VOICE_CALL_FROM` is set |
+| Urgent alert unacknowledged for `CALL_AFTER_MIN` (an emergency: at once) | phone call; pressing 1 acknowledges it | yes, once Twilio is set up |
 | The same question `REPEAT_THRESHOLD` times in a day (a double dose attempt: twice) | info (warning) | no (yes) |
 | A possible medicine interaction | info, warning if serious | dashboard |
 
