@@ -319,10 +319,10 @@
     speech && speech.cancel();
   }
 
-  async function speak(text, then) {
+  async function speak(text, then, { always = false } = {}) {
     let finished = false;
     const done = () => { if (finished) return; finished = true; setState("idle", IDLE()); then && then(); };
-    if (!$("speakToggle").checked) return done();
+    if (!always && !$("speakToggle").checked) return done();
     if (serverVoice) {
       try {
         const r = await fetch(`/api/voice/sessions/${sid}/speech`, { method: "POST", headers, body: JSON.stringify({ text }) });
@@ -542,60 +542,58 @@
     $("log").replaceChildren(w);
   }
 
-  // Reminders ring here the way they would on an Echo: a chime, then Kinvesper reads it out. An
-  // important one (an alarm) keeps chiming until Stop, like "Alexa, stop" on the Echo.
-  let bell = null, alarm = null;
-  const unlockBell = () => {  // browsers only play sound after the page has been clicked once
-    try { bell = bell || new (window.AudioContext || window.webkitAudioContext)(); bell.resume(); } catch { /* no Web Audio */ }
-  };
-  addEventListener("pointerdown", unlockBell);
-  addEventListener("keydown", unlockBell);
-
-  function chime() {
-    if (!bell || bell.state !== "running") return;
-    const t0 = bell.currentTime;
-    [[880, 0], [1175, 0.22], [1568, 0.44]].forEach(([freq, at]) => {
-      const osc = bell.createOscillator(), gain = bell.createGain();
-      osc.type = "sine"; osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0001, t0 + at);
-      gain.gain.exponentialRampToValueAtTime(0.35, t0 + at + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.6);
-      osc.connect(gain).connect(bell.destination);
-      osc.start(t0 + at); osc.stop(t0 + at + 0.65);
-    });
-  }
+  // Reminders go off here the way they would on an Echo: Kinvesper says them out loud ("Margaret, it's
+  // time to drink water."), even with "Speak replies" off. An important one (an alarm) is repeated
+  // until Stop, like "Alexa, stop" on the Echo.
+  let alarm = null;
+  const MAX_REPEATS = 4;
 
   function stopAlarm() {
     if (!alarm) return;
-    clearInterval(alarm.timer);
+    clearTimeout(alarm.timer);
     alarm.msg.classList.remove("ringing");
     alarm.msg.querySelector(".quick")?.remove();
     alarm = null;
     document.title = TITLE;
   }
 
+  function sayReminder(text, then) {
+    if (busy || recording) return setTimeout(() => sayReminder(text, then), 1000);  // let the current turn finish
+    speak(text, then, { always: true });
+  }
+
   function ring(a) {
     const important = a.ring === "alarm";
     const msg = addMessage("bot ring", a.text, { tag: important ? "Alarm" : "Reminder" });
     if (document.hidden) document.title = `⏰ ${important ? "Alarm" : "Reminder"} · ${TITLE}`;
-    chime();
-    if (important) {
-      stopAlarm();
-      msg.classList.add("ringing");
+    // Browsers won't play sound on a page nobody has clicked yet: offer a button to hear it.
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
       const row = el("div", "quick");
-      const stop = el("button", "", "Stop alarm");
-      stop.type = "button";
-      stop.onclick = () => { stopAlarm(); stopSpeaking(); };
-      row.append(stop);
+      const hear = el("button", "", "Tap to hear it");
+      hear.type = "button";
+      hear.onclick = () => { row.remove(); speak(a.text, null, { always: true }); };
+      row.append(hear);
       msg.append(row);
       msg.scrollIntoView({ behavior: "smooth", block: "end" });
-      const started = Date.now();
-      alarm = { msg, timer: setInterval(() => {
-        if (Date.now() - started > 60000) return stopAlarm();  // an Echo timer also gives up after a while
-        if (!player && !(speech && speech.speaking)) chime();
-      }, 2500) };
+      return;
     }
-    if (!busy && !recording) setTimeout(() => speak(a.text), 1200);  // after the chime
+    if (!important) return sayReminder(a.text);
+    stopAlarm();
+    msg.classList.add("ringing");
+    const row = el("div", "quick");
+    const stop = el("button", "", "Stop alarm");
+    stop.type = "button";
+    stop.onclick = () => { stopAlarm(); stopSpeaking(); };
+    row.append(stop);
+    msg.append(row);
+    msg.scrollIntoView({ behavior: "smooth", block: "end" });
+    const current = alarm = { msg, timer: null, said: 0 };
+    const again = () => {
+      if (alarm !== current) return;
+      if (++current.said >= MAX_REPEATS) return stopAlarm();
+      current.timer = setTimeout(() => alarm === current && sayReminder(a.text, again), 4000);
+    };
+    sayReminder(a.text, again);
   }
 
   async function pollAnnouncements() {

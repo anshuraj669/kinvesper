@@ -62,7 +62,7 @@ def due_rings(service: CareService, session: VoiceSession) -> list[Announcement]
     for key, text, alarm in due:
         if key not in session.rung:
             session.rung.add(key)
-            out.append(Announcement(text=text, ring="alarm" if alarm else "chime"))
+            out.append(Announcement(text=text, ring="alarm" if alarm else "reminder"))
     return out
 
 

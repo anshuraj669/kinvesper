@@ -168,11 +168,11 @@ async def test_echo_gets_reminder_heads_up_and_ringing_timer(bridge, api, servic
     spoken = sorted((b["trigger"]["scheduledTime"], b["alertInfo"]["spokenInfo"]["content"][0]["text"])
                     for b in api.reminders.values())
     assert spoken == [
-        ("2026-10-14T15:00:00.000", "Margaret, in 30 minutes: doctor's appointment."),
-        ("2026-10-14T15:30:00.000", "Margaret, this is your important reminder: doctor's appointment."),
-        ("2026-10-14T17:00:00.000", "Margaret, here's your reminder: call Priya."),
-        ("2026-10-15T08:30:00.000", "Margaret, in 30 minutes: flight to Delhi."),
-        ("2026-10-15T09:00:00.000", "Margaret, this is your important reminder: flight to Delhi."),
+        ("2026-10-14T15:00:00.000", "Margaret, in 30 minutes it'll be time for your doctor's appointment."),
+        ("2026-10-14T15:30:00.000", "Margaret, this is an important reminder. It's time for your doctor's appointment."),
+        ("2026-10-14T17:00:00.000", "Margaret, it's time to call Priya."),
+        ("2026-10-15T08:30:00.000", "Margaret, in 30 minutes it'll be time for your flight to Delhi."),
+        ("2026-10-15T09:00:00.000", "Margaret, this is an important reminder. It's time for your flight to Delhi."),
     ]
     (timer,) = api.timers.values()  # only the alarm within 2 hours rings until stopped
     assert timer["duration"] == "PT5400S" and timer["triggeringBehavior"]["notificationConfig"]["playAudible"]
@@ -222,7 +222,7 @@ def test_simulator_rings_what_the_echo_would(service, monkeypatch):
 
     current = datetime(2026, 10, 15, 8, 1, tzinfo=settings.tz)
     monkeypatch.setattr(web, "now", lambda: current)
-    service.store.save("reminder", Reminder(id="rem_call", text="call Priya", at=(current - timedelta(minutes=1)).isoformat()))
+    service.store.save("reminder", Reminder(id="rem_call", text="drink water", at=(current - timedelta(minutes=1)).isoformat()))
     service.store.save("reminder", Reminder(id="rem_dr", text="see the doctor", important=True,
                                             at=(current + timedelta(minutes=29)).isoformat()))
     service.store.save("reminder", Reminder(id="rem_off", text="nothing", status="cancelled", at=current.isoformat()))
@@ -230,12 +230,21 @@ def test_simulator_rings_what_the_echo_would(service, monkeypatch):
 
     rings = web.due_rings(service, session)
     texts = [(a.ring, a.text) for a in rings]
-    assert any(ring == "chime" and "time for your" in text and "Metformin" in text for ring, text in texts)  # 8 AM dose
-    assert ("chime", "Margaret, here's your reminder: call Priya.") in texts
-    assert ("chime", "Margaret, in 30 minutes: see the doctor.") in texts
+    assert any(ring == "reminder" and "time for your" in text and "Metformin" in text for ring, text in texts)  # 8 AM dose
+    assert ("reminder", "Margaret, it's time to drink water.") in texts
+    assert ("reminder", "Margaret, in 30 minutes it'll be time to see the doctor.") in texts
     assert not any("nothing" in text for _, text in texts)
     assert web.due_rings(service, session) == []  # each rings once
 
     current += timedelta(minutes=29)
     assert [(a.ring, a.text) for a in web.due_rings(service, session)] == [
-        ("alarm", "Margaret, this is your important reminder: see the doctor.")]
+        ("alarm", "Margaret, this is an important reminder. It's time to see the doctor.")]
+
+
+def test_reminders_are_said_back_to_the_person():
+    from kinvesper.i18n import action
+    assert action("drink water") == "to drink water"
+    assert action("take my blood pressure medicine") == "to take your blood pressure medicine"
+    assert action("call Priya and tell her I am fine") == "to call Priya and tell her you are fine"
+    assert action("doctor's appointment") == "for your doctor's appointment"
+    assert action("the plumber") == "for the plumber"

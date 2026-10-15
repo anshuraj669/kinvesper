@@ -298,7 +298,7 @@ def build_server(service: CareService) -> KinvesperMCP:
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
     )
     async def set_reminder(
-        what: Annotated[str, Field(description="A short phrase, e.g. 'call Priya', 'doctor's appointment'")],
+        what: Annotated[str, Field(description="What to do, as an action, e.g. 'drink water', 'call Priya', 'go to the doctor's appointment'")],
         at: Annotated[str, Field(description="Local date and time, ISO 8601, e.g. 2026-10-14T17:00")] = "",
         important: Annotated[bool, Field(description="An alarm for something important")] = False,
         in_minutes: Annotated[int | None, Field(description="Instead of `at`: this many minutes from now", ge=1)] = None,

@@ -22,7 +22,7 @@ from typing import Literal
 import httpx
 
 from .config import now, settings
-from .i18n import hindi_time, joined, lang, t
+from .i18n import action, hindi_time, joined, lang, t
 from .models import Medication, Profile, Reminder
 from .service import spoken_time
 from .store import Store
@@ -80,9 +80,9 @@ def ringing(profile: Profile, meds: list[Medication], reminders: list[Reminder],
             continue
         at = datetime.fromisoformat(r.at).astimezone(settings.tz)
         if r.important and since < at - HEADS_UP <= current:
-            out.append((f"{r.id}:heads_up", t(locale, "heads_up", name=name, text=r.text), False))
+            out.append((f"{r.id}:heads_up", t(locale, "heads_up", name=name, text=r.text, action=action(r.text)), False))
         if since < at <= current:
-            out.append((r.id, t(locale, "alarm" if r.important else "oneoff", name=name, text=r.text), r.important))
+            out.append((r.id, t(locale, "alarm" if r.important else "oneoff", name=name, text=r.text, action=action(r.text)), r.important))
     return out
 
 
@@ -200,9 +200,9 @@ class EchoReminders:
                         continue
                     entry = {"tokens": []}
                     name = profile.preferred_name
-                    times = [(at, t(locale, "alarm" if r.important else "oneoff", name=name, text=r.text))]
+                    times = [(at, t(locale, "alarm" if r.important else "oneoff", name=name, text=r.text, action=action(r.text)))]
                     if r.important and at - current > HEADS_UP + timedelta(minutes=5):
-                        times.append((at - HEADS_UP, t(locale, "heads_up", name=name, text=r.text)))
+                        times.append((at - HEADS_UP, t(locale, "heads_up", name=name, text=r.text, action=action(r.text))))
                     for when_, text in times:
                         resp = await http.post(PATH, json=one_off_body(text, when_, locale))
                         if resp.status_code in (401, 403):

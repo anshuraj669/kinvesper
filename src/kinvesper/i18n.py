@@ -4,6 +4,8 @@ advice, confirmations) comes from the voice agent, which Claude answers in the p
 
 from __future__ import annotations
 
+import re
+
 LANGUAGES = {"en": "English", "hi": "Hindi"}
 
 TEXT = {
@@ -30,9 +32,9 @@ TEXT = {
         "reminders_unavailable": "Sorry, reminders aren't available here.",
         "reminder": "{name}, it's time for your {medicines}. {notes} When you've taken them, say: Alexa, tell kin vesper I took my pills.",
         "and": "and",
-        "oneoff": "{name}, here's your reminder: {text}.",
-        "alarm": "{name}, this is your important reminder: {text}.",
-        "heads_up": "{name}, in 30 minutes: {text}.",
+        "oneoff": "{name}, it's time {action}.",
+        "alarm": "{name}, this is an important reminder. It's time {action}.",
+        "heads_up": "{name}, in 30 minutes it'll be time {action}.",
         "reminder_saved": "Thank you. Your reminder is set on this Echo.",
         "reminder_not_on_echo": "Okay. I've saved the reminder, but without permission this Echo can't ring for it.",
     },
@@ -66,6 +68,31 @@ TEXT = {
         "reminder_not_on_echo": "ठीक है। मैंने रिमाइंडर सेव कर लिया है, पर अनुमति के बिना यह Echo उसके लिए नहीं बजेगा।",
     },
 }
+
+
+# Spoken reminders say "it's time to drink water" or "it's time for your doctor's appointment".
+VERBS = set("""take drink call eat go check pay water feed walk buy pick turn switch lock unlock close open send book
+meet see visit watch cook clean wash charge sleep wake get bring collect put read write text message ring phone dial
+exercise stretch pray do start stop leave join attend prepare pack renew order fill apply change move have give tell
+ask remember sign submit wish greet measure test record wear use bathe shower brush comb boil heat cool mail post
+return fetch catch drop make finish rest sit stand lie play sing listen""".split())
+NOT_ACTIONS = {"the", "my", "your", "a", "an", "his", "her", "our", "their", "this", "that"}
+
+
+PERSON = {"my": "your", "me": "you", "i": "you", "myself": "yourself", "mine": "yours", "i'm": "you're"}
+
+
+def action(text: str) -> str:
+    """'drink water' -> 'to drink water'; "doctor's appointment" -> "for your doctor's appointment";
+    'take my medicine' -> 'to take your medicine' (it's said back to the person)."""
+    text = re.sub(r"\bI am\b", "you are", text, flags=re.I)
+    text = re.sub(r"\b(?:my|me|i|myself|mine|i'm)\b", lambda m: PERSON[m[0].lower()], text, flags=re.I)
+    first = text.split()[0].lower() if text.split() else ""
+    if first in VERBS:
+        return f"to {text}"
+    if first in NOT_ACTIONS:
+        return f"for {text}"
+    return f"for your {text}"
 
 
 def lang(locale: str | None) -> str:

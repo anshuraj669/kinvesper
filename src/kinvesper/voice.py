@@ -95,7 +95,7 @@ class TurnResult(BaseModel):
 class Announcement(BaseModel):
     text: str
     tool_calls: list[ToolCall] = []
-    ring: Literal["", "chime", "alarm"] = ""  # a reminder going off: the page plays a sound first
+    ring: Literal["", "reminder", "alarm"] = ""  # a reminder going off: the page says it aloud
 
 
 def spoken_clock() -> str:
