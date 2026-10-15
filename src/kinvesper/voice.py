@@ -24,7 +24,7 @@ import warnings
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import anthropic
 import httpx
@@ -95,6 +95,7 @@ class TurnResult(BaseModel):
 class Announcement(BaseModel):
     text: str
     tool_calls: list[ToolCall] = []
+    ring: Literal["", "chime", "alarm"] = ""  # a reminder going off: the page plays a sound first
 
 
 def spoken_clock() -> str:
@@ -238,6 +239,7 @@ class VoiceSession:
         self.language = "en"  # i18n.LANGUAGES key; set from the Alexa request's locale
         self.notes: list[str] = []  # background updates for the model, sent with the next user turn
         self.announcements: list[Announcement] = []
+        self.rung: set[str] = set()  # reminders this page has already rung
         self._calls: list[ToolCall] = []
         self._pending: _Pending | None = None
         self._pending_event = asyncio.Event()

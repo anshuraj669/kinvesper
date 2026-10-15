@@ -64,6 +64,28 @@ def reminder_text(profile: Profile, meds: list[Medication], locale: str = "en-US
     return t(locale, "reminder", name=profile.preferred_name, medicines=listed, notes=notes).replace("  ", " ")
 
 
+def ringing(profile: Profile, meds: list[Medication], reminders: list[Reminder], since: datetime,
+            current: datetime, locale: str = "en-US") -> list[tuple[str, str, bool]]:
+    """What an Echo would say between `since` and `current`: dose reminders, one-off reminders and an
+    important one's heads-up, as (key, text, is_alarm). The voice simulator rings these itself."""
+    out: list[tuple[str, str, bool]] = []
+    name = profile.preferred_name
+    for time, group in doses_by_time(meds).items():
+        h, m = (int(x) for x in time.split(":"))
+        at = current.replace(hour=h, minute=m, second=0, microsecond=0)
+        if since < at <= current:
+            out.append((f"pills:{at.date()}:{time}", reminder_text(profile, group, locale), False))
+    for r in reminders:
+        if r.status == "cancelled":
+            continue
+        at = datetime.fromisoformat(r.at).astimezone(settings.tz)
+        if r.important and since < at - HEADS_UP <= current:
+            out.append((f"{r.id}:heads_up", t(locale, "heads_up", name=name, text=r.text), False))
+        if since < at <= current:
+            out.append((r.id, t(locale, "alarm" if r.important else "oneoff", name=name, text=r.text), r.important))
+    return out
+
+
 def reminder_body(text: str, time: str, locale: str) -> dict:
     hour, minute = time.split(":")
     today = now().strftime("%Y-%m-%d")

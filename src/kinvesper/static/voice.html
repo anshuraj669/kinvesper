@@ -124,6 +124,10 @@
   .msg.bot .bubble { background: var(--bot); border-bottom-left-radius: 4px; }
   .msg.update .bubble { background: var(--brand-soft); }
   .msg.confirm .bubble { background: var(--warn-soft); }
+  .msg.ring .bubble { background: var(--warn-soft); border: 1px solid var(--warn); }
+  .msg.ring .tag { color: var(--warn); }
+  .msg.ring.ringing .bubble { animation: ringing 1s ease-in-out infinite; }
+  @keyframes ringing { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 6px var(--warn-soft); } }
   .meta { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
   .tag { font-weight: 650; color: var(--brand); }
   .msg.confirm .tag { color: var(--warn); }
@@ -142,7 +146,7 @@
   .typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
   .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
-  @media (prefers-reduced-motion: reduce) { .orb, .orb::after, .typing i { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .orb, .orb::after, .typing i, .msg.ring .bubble { animation: none !important; } }
   .quick { display: flex; gap: 8px; }
   .quick button { font-weight: 650; padding: 8px 18px; border-radius: 10px; border: none; cursor: pointer; background: var(--brand); color: var(--brand-ink); }
   .quick button.no { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
@@ -265,6 +269,7 @@
   };
   const svg = (name) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[name]}</svg>`;
 
+  const TITLE = document.title;
   const IDLE = () => voiceInput ? "Tap the circle and speak" : "Type below to talk";
   const setState = (state, text) => { $("orb").dataset.state = state; $("status").textContent = text; };
   const showError = (text) => { $("error").textContent = text; $("error").hidden = !text; };
@@ -372,6 +377,7 @@
     if (!text || !sid || busy) return;
     setBusy(true); showError("");
     stopSpeaking();
+    stopAlarm();  // talking to it silences the alarm, as on an Echo
     document.querySelectorAll(".quick").forEach((q) => q.remove());
     addMessage("user", text);
     $("text").value = "";
@@ -536,12 +542,70 @@
     $("log").replaceChildren(w);
   }
 
+  // Reminders ring here the way they would on an Echo: a chime, then Kinvesper reads it out. An
+  // important one (an alarm) keeps chiming until Stop, like "Alexa, stop" on the Echo.
+  let bell = null, alarm = null;
+  const unlockBell = () => {  // browsers only play sound after the page has been clicked once
+    try { bell = bell || new (window.AudioContext || window.webkitAudioContext)(); bell.resume(); } catch { /* no Web Audio */ }
+  };
+  addEventListener("pointerdown", unlockBell);
+  addEventListener("keydown", unlockBell);
+
+  function chime() {
+    if (!bell || bell.state !== "running") return;
+    const t0 = bell.currentTime;
+    [[880, 0], [1175, 0.22], [1568, 0.44]].forEach(([freq, at]) => {
+      const osc = bell.createOscillator(), gain = bell.createGain();
+      osc.type = "sine"; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t0 + at);
+      gain.gain.exponentialRampToValueAtTime(0.35, t0 + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.6);
+      osc.connect(gain).connect(bell.destination);
+      osc.start(t0 + at); osc.stop(t0 + at + 0.65);
+    });
+  }
+
+  function stopAlarm() {
+    if (!alarm) return;
+    clearInterval(alarm.timer);
+    alarm.msg.classList.remove("ringing");
+    alarm.msg.querySelector(".quick")?.remove();
+    alarm = null;
+    document.title = TITLE;
+  }
+
+  function ring(a) {
+    const important = a.ring === "alarm";
+    const msg = addMessage("bot ring", a.text, { tag: important ? "Alarm" : "Reminder" });
+    if (document.hidden) document.title = `⏰ ${important ? "Alarm" : "Reminder"} · ${TITLE}`;
+    chime();
+    if (important) {
+      stopAlarm();
+      msg.classList.add("ringing");
+      const row = el("div", "quick");
+      const stop = el("button", "", "Stop alarm");
+      stop.type = "button";
+      stop.onclick = () => { stopAlarm(); stopSpeaking(); };
+      row.append(stop);
+      msg.append(row);
+      msg.scrollIntoView({ behavior: "smooth", block: "end" });
+      const started = Date.now();
+      alarm = { msg, timer: setInterval(() => {
+        if (Date.now() - started > 60000) return stopAlarm();  // an Echo timer also gives up after a while
+        if (!player && !(speech && speech.speaking)) chime();
+      }, 2500) };
+    }
+    if (!busy && !recording) setTimeout(() => speak(a.text), 1200);  // after the chime
+  }
+
   async function pollAnnouncements() {
-    if (sid && document.visibilityState === "visible") {
+    // Keep checking in a background tab too, so a reminder still rings there.
+    if (sid) {
       try {
         const r = await fetch(`/api/voice/sessions/${sid}/announcements`, { headers });
         if (r.ok) {
           for (const a of await r.json()) {
+            if (a.ring) { ring(a); continue; }
             addMessage("bot update", a.text, { tag: "Update", calls: a.tool_calls });
             if (!busy && !recording) speak(a.text);
           }
@@ -550,6 +614,7 @@
     }
     setTimeout(pollAnnouncements, 2000);
   }
+  addEventListener("visibilitychange", () => { if (!document.hidden && !alarm) document.title = TITLE; });
 
   async function start() {
     setState("thinking", "Connecting…");
@@ -578,6 +643,7 @@
   async function restart() {
     stopSpeaking();
     stopRecording();
+    stopAlarm();
     if (sid) fetch(`/api/voice/sessions/${sid}`, { method: "DELETE", headers }).catch(() => {});
     sid = null;
     showError("");
@@ -592,7 +658,7 @@
   addEventListener("keydown", (e) => {
     const typing = /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(document.activeElement?.tagName) && document.activeElement.id !== "orb";
     if (e.code === "Space" && !typing && !e.repeat && sid) { e.preventDefault(); talk(); }
-    if (e.key === "Escape") { stopSpeaking(); stopRecording(); }
+    if (e.key === "Escape") { stopSpeaking(); stopRecording(); stopAlarm(); }
   });
   addEventListener("pagehide", () => { if (sid) fetch(`/api/voice/sessions/${sid}`, { method: "DELETE", headers, keepalive: true }); });
   start();

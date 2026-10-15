@@ -177,9 +177,9 @@ class CareService:
         self.store.save("reminder", r)
         said = when.spoken(due, current)
         p = self.profile()
-        msg = (f"Okay, important alarm set {said}: {text}. I'll remind you 30 minutes before as well, "
-               f"and let {p.caregiver_name} know at the time." if important
-               else f"Okay, I'll remind you {said}: {text}.")
+        also = (f"I'll remind you 30 minutes before as well, and let {p.caregiver_name} know at the time."
+                if due - current > timedelta(minutes=35) else f"I'll let {p.caregiver_name} know at the time as well.")
+        msg = f"Okay, important alarm set {said}: {text}. {also}" if important else f"Okay, I'll remind you {said}: {text}."
         return ReminderResult(reminder=r, message=msg)
 
     def list_reminders(self) -> ReminderResult:

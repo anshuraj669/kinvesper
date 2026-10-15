@@ -220,7 +220,7 @@ async def test_contacts_are_replaced_and_validated(service):
 
 @pytest.fixture
 def clock(monkeypatch):
-    state = {"t": now()}
+    state = {"t": now().replace(hour=6, minute=0, second=0, microsecond=0)}  # well before any dose is overdue
     monkeypatch.setattr(service_module, "now", lambda: state["t"])
     return state
 

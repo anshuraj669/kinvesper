@@ -1,6 +1,7 @@
 """Echo pill reminders through the Alexa Reminders API (a fake API here)."""
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -197,3 +198,31 @@ async def test_timer_permission_missing_still_sets_the_reminders(bridge, api, se
     await service.add_reminder("take the cake out", "2026-10-14T14:40", important=True)
     assert await bridge.reminders.push(SYSTEM, service.profile(), service.reminders(), "en-US") == "ok"
     assert len(api.reminders) == 2 and not api.timers  # the heads-up and the alarm still play; no ringing timer
+
+
+def test_simulator_rings_what_the_echo_would(service, monkeypatch):
+    """The voice simulator has no Echo: due dose times, reminders and alarms ring on the page, once."""
+    from datetime import timedelta
+
+    from kinvesper import web
+    from kinvesper.models import Reminder
+
+    current = datetime(2026, 10, 15, 8, 1, tzinfo=settings.tz)
+    monkeypatch.setattr(web, "now", lambda: current)
+    service.store.save("reminder", Reminder(id="rem_call", text="call Priya", at=(current - timedelta(minutes=1)).isoformat()))
+    service.store.save("reminder", Reminder(id="rem_dr", text="see the doctor", important=True,
+                                            at=(current + timedelta(minutes=29)).isoformat()))
+    service.store.save("reminder", Reminder(id="rem_off", text="nothing", status="cancelled", at=current.isoformat()))
+    session = SimpleNamespace(language="en", rung=set())
+
+    rings = web.due_rings(service, session)
+    texts = [(a.ring, a.text) for a in rings]
+    assert any(ring == "chime" and "time for your" in text and "Metformin" in text for ring, text in texts)  # 8 AM dose
+    assert ("chime", "Margaret, here's your reminder: call Priya.") in texts
+    assert ("chime", "Margaret, in 30 minutes: see the doctor.") in texts
+    assert not any("nothing" in text for _, text in texts)
+    assert web.due_rings(service, session) == []  # each rings once
+
+    current += timedelta(minutes=29)
+    assert [(a.ring, a.text) for a in web.due_rings(service, session)] == [
+        ("alarm", "Margaret, this is your important reminder: see the doctor.")]
