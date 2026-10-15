@@ -7,24 +7,44 @@
 <style>
   :root {
     color-scheme: light;
-    --bg: #f4f6f5; --panel: #ffffff; --ink: #14201d; --ink-2: #4a5754; --muted: #6f7c78; --line: #dfe5e3;
-    --brand: #0f766e; --brand-ink: #ffffff; --brand-soft: #d9f0ec; --wash: #f1f4f3;
-    --good: #0ca30c; --warning: #fab219; --warning-ink: #8a5a00; --critical: #d03b3b; --critical-soft: #fdeceb;
-    --shadow: 0 1px 2px rgba(16,24,22,.06), 0 8px 24px rgba(16,24,22,.05);
+    --base: #e9eef0; --ink: #0f1a19; --ink-2: #33423f; --muted: #556461;
+    --panel: #f7fafa; --bg: rgba(15,30,28,.055); --wash: rgba(15,30,28,.055); --line: rgba(15,30,28,.11);
+    --glass: rgba(255,255,255,.58); --glass-strong: rgba(255,255,255,.80); --glass-edge: rgba(255,255,255,.75);
+    --well: rgba(15,30,28,.06); --well-edge: rgba(15,30,28,.08); --glow: rgba(255,255,255,.55);
+    --blob-1: #7dd3c8; --blob-2: #93b8f5; --blob-3: #c9b6f2; --blob-4: #f7c9a8;
+    --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.35) inset, 0 2px 6px rgba(20,40,40,.06), 0 24px 48px -18px rgba(20,40,60,.28);
+    --depth-hover: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.45) inset, 0 4px 10px rgba(20,40,40,.08), 0 36px 64px -20px rgba(20,40,60,.36);
+    --blur: blur(28px) saturate(170%); --shadow: var(--depth);
+    --brand: #0f766e; --brand-ink: #ffffff; --brand-soft: rgba(15,118,110,.13);
+    --good: #0b8f0b; --warning: #e9a00a; --warning-ink: #8a5a00; --critical: #d03b3b; --critical-soft: rgba(208,59,59,.10);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
-      --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --ink-2: #c3cfcb; --muted: #93a39f; --line: #25332f;
-      --brand: #2dd4bf; --brand-ink: #04201c; --brand-soft: #123a35; --wash: #1c2a27; --warning-ink: #fbbf24;
-      --critical: #f07070; --critical-soft: #3a1717; --shadow: none;
+      --base: #070b0f; --ink: #eef4f3; --ink-2: #c4d0cd; --muted: #97a6a3;
+      --panel: #1d272c; --bg: rgba(0,0,0,.24); --wash: rgba(255,255,255,.06); --line: rgba(255,255,255,.10);
+      --glass: rgba(38,48,54,.46); --glass-strong: rgba(44,56,62,.76); --glass-edge: rgba(255,255,255,.16);
+      --well: rgba(0,0,0,.24); --well-edge: rgba(255,255,255,.06); --glow: rgba(255,255,255,.10);
+      --blob-1: #0e6b62; --blob-2: #1d3f8a; --blob-3: #4b2a7a; --blob-4: #7a3b1f;
+      --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.07) inset, 0 24px 56px -20px rgba(0,0,0,.7);
+      --depth-hover: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.12) inset, 0 36px 72px -20px rgba(0,0,0,.8);
+      --blur: blur(28px) saturate(170%); --shadow: var(--depth);
+      --brand: #2dd4bf; --brand-ink: #04201c; --brand-soft: rgba(45,212,191,.16);
+      --good: #34c759; --warning: #ffcc33; --warning-ink: #ffcc33; --critical: #ff6b63; --critical-soft: rgba(255,95,87,.14);
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --bg: #0d1413; --panel: #15201e; --ink: #e6efec; --ink-2: #c3cfcb; --muted: #93a39f; --line: #25332f;
-    --brand: #2dd4bf; --brand-ink: #04201c; --brand-soft: #123a35; --wash: #1c2a27; --warning-ink: #fbbf24;
-    --critical: #f07070; --critical-soft: #3a1717; --shadow: none;
+    --base: #070b0f; --ink: #eef4f3; --ink-2: #c4d0cd; --muted: #97a6a3;
+    --panel: #1d272c; --bg: rgba(0,0,0,.24); --wash: rgba(255,255,255,.06); --line: rgba(255,255,255,.10);
+    --glass: rgba(38,48,54,.46); --glass-strong: rgba(44,56,62,.76); --glass-edge: rgba(255,255,255,.16);
+    --well: rgba(0,0,0,.24); --well-edge: rgba(255,255,255,.06); --glow: rgba(255,255,255,.10);
+    --blob-1: #0e6b62; --blob-2: #1d3f8a; --blob-3: #4b2a7a; --blob-4: #7a3b1f;
+    --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.07) inset, 0 24px 56px -20px rgba(0,0,0,.7);
+    --depth-hover: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.12) inset, 0 36px 72px -20px rgba(0,0,0,.8);
+    --blur: blur(28px) saturate(170%); --shadow: var(--depth);
+    --brand: #2dd4bf; --brand-ink: #04201c; --brand-soft: rgba(45,212,191,.16);
+    --good: #34c759; --warning: #ffcc33; --warning-ink: #ffcc33; --critical: #ff6b63; --critical-soft: rgba(255,95,87,.14);
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; scroll-padding-top: 80px; }
@@ -161,16 +181,134 @@
     .savebar { padding: 10px 16px; }
     .savebar .msg { font-size: 13px; }
   }
+
+  /* ================= spatial layer =================
+     Frosted-glass panels float over a slowly drifting colour backdrop (the same design as the dashboard). */
+  html { background: var(--base); }
+  body { background: transparent; font-family: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  .backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .backdrop i { position: absolute; width: 58vmax; height: 58vmax; border-radius: 50%; filter: blur(90px); opacity: .75; }
+  .backdrop i:nth-child(1) { background: var(--blob-1); top: -22vmax; left: -14vmax; animation: drift1 38s ease-in-out infinite alternate; }
+  .backdrop i:nth-child(2) { background: var(--blob-2); top: -10vmax; right: -20vmax; animation: drift2 44s ease-in-out infinite alternate; }
+  .backdrop i:nth-child(3) { background: var(--blob-3); bottom: -26vmax; left: 18vmax; animation: drift3 50s ease-in-out infinite alternate; }
+  .backdrop i:nth-child(4) { background: var(--blob-4); bottom: -30vmax; right: -12vmax; opacity: .45; animation: drift1 56s ease-in-out infinite alternate-reverse; }
+  @keyframes drift1 { to { transform: translate(8vmax, 6vmax) scale(1.08); } }
+  @keyframes drift2 { to { transform: translate(-10vmax, 8vmax) scale(.94); } }
+  @keyframes drift3 { to { transform: translate(6vmax, -8vmax) scale(1.1); } }
+
+  .card, .ornament, .glass {
+    background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--depth); border: none;
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .card, .ornament, .glass { background: var(--glass-strong); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .card, .ornament, .glass { background: var(--glass-strong); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    .backdrop i { opacity: .25; }
+  }
+  .ornament { background: var(--glass-strong); }  /* toolbars stay legible over content scrolling under them */
+  .card { border-radius: 26px; position: relative; isolation: isolate; transition: box-shadow .35s, transform .35s cubic-bezier(.2,.8,.2,1); }
+  .card::before { /* a glow that follows the pointer, like gaze on Vision Pro */
+    content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: -1; opacity: 0; transition: opacity .3s; pointer-events: none;
+    background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), var(--glow), transparent 60%);
+  }
+  .card:hover { box-shadow: var(--depth-hover); }
+  .card:hover::before { opacity: 1; }
+
+  /* floating toolbar */
+  header { position: sticky; top: 14px; z-index: 10; display: block; max-width: var(--page, 1180px); margin: 14px auto 0; padding: 0 20px; background: none; border: none; }
+  .ornament { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: 999px; }
+  .logo { width: 34px; height: 34px; border-radius: 50%; flex: none; display: grid; place-items: center; color: #fff;
+    background: linear-gradient(140deg, #2dd4bf, #2a78d6); box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 6px 14px -4px rgba(42,120,214,.6); }
+  .logo svg { width: 18px; height: 18px; }
+  header h1 { letter-spacing: -.01em; }
+
+  /* capsule buttons that brighten under the pointer */
+  .btn { border: none; border-radius: 999px; background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; color: var(--ink);
+    transition: background .2s, transform .2s, box-shadow .2s; }
+  .btn:hover:not(:disabled) { background: var(--glass-strong); box-shadow: 0 0 0 1px var(--glass-edge) inset, 0 6px 16px -6px rgba(0,0,0,.25); transform: translateY(-1px); }
+  .btn:active:not(:disabled) { transform: scale(.97); }
+  .btn.primary { background: var(--brand); color: var(--brand-ink); box-shadow: 0 1px 0 rgba(255,255,255,.35) inset, 0 8px 18px -8px var(--brand); }
+  .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--brand) 88%, #fff); }
+
+  /* recessed fields */
+  input:not([type="checkbox"]) { border: none; border-radius: 12px; background: var(--well);
+    box-shadow: 0 0 0 1px var(--well-edge) inset, 0 1px 2px rgba(0,0,0,.06) inset; transition: box-shadow .2s, background .2s; }
+  input:not([type="checkbox"]):hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 35%, transparent) inset; }
+  input:not([type="checkbox"]):focus { outline: none; background: var(--glass-strong); box-shadow: 0 0 0 2px var(--brand) inset, 0 0 0 5px var(--brand-soft); }
+
+  .toast { background: var(--glass-strong); color: var(--ink); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    box-shadow: var(--depth); border-radius: 999px; font-weight: 550; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .backdrop i { animation: none !important; }
+    .card, .btn, .btn:hover:not(:disabled) { transition: none; transform: none; }
+  }
+  @media (max-width: 900px) {
+    header { top: 10px; margin-top: 10px; padding: 0 16px; }
+    .ornament { padding: 6px 6px 6px 10px; gap: 8px; border-radius: 22px; }
+    .logo { width: 30px; height: 30px; }
+    .card { border-radius: 22px; }
+  }
+
+  :root { --page: 1100px; }
+  html { scroll-padding-top: 96px; }
+  .layout { padding-top: 22px; }
+  nav.sections { top: 92px; padding: 8px; border-radius: 22px; background: var(--glass); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--depth); }
+  nav.sections a { border-radius: 14px; transition: background .2s; }
+  nav.sections a:hover { background: var(--well); }
+  nav.sections a[aria-current="true"] { background: var(--glass-strong); color: var(--brand); box-shadow: 0 1px 0 var(--glass-edge) inset, 0 4px 12px -4px rgba(0,0,0,.18); }
+  .dot.good { box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent); }
+  .dot.warn { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 25%, transparent); }
+  .dot.bad { box-shadow: 0 0 0 3px color-mix(in srgb, var(--critical) 22%, transparent); }
+  .progress-card .bar-track { height: 10px; background: var(--well); box-shadow: 0 1px 2px rgba(0,0,0,.08) inset; }
+  .progress-card .bar-track span { background: linear-gradient(90deg, #2dd4bf, var(--good)); box-shadow: 0 0 12px -2px var(--good); }
+  .item { border: none; border-radius: 18px; background: var(--wash); box-shadow: 0 0 0 1px var(--well-edge) inset; transition: background .2s, box-shadow .2s; }
+  .item:hover { background: var(--glass-strong); }
+  .item.open { background: var(--glass-strong); box-shadow: 0 1px 0 var(--glass-edge) inset, 0 12px 28px -14px rgba(0,0,0,.3); }
+  .item.has-error { box-shadow: 0 0 0 1.5px var(--critical) inset; }
+  .item-body { border-top-color: var(--line); }
+  .time { border: none; border-radius: 12px; background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; }
+  .time input, .time input:hover, .time input:focus { background: none; box-shadow: none; }
+  .time:focus-within { box-shadow: 0 0 0 2px var(--brand) inset, 0 0 0 5px var(--brand-soft); }
+  .preset { border: none; background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; transition: background .2s; }
+  .preset:hover { background: var(--glass-strong); }
+  .preset[aria-pressed="true"] { background: var(--brand-soft); box-shadow: 0 0 0 1.5px var(--brand) inset; }
+  .note { border-radius: 14px; background: var(--well); }
+  .optional { background: var(--well); }
+  .empty { border-radius: 18px; }
+  input:not([type="checkbox"])[aria-invalid="true"], input:not([type="checkbox"])[aria-invalid="true"]:focus {
+    background: var(--critical-soft); box-shadow: 0 0 0 1.5px var(--critical) inset; }
+  input:not([type="checkbox"])[aria-invalid="true"]:focus { box-shadow: 0 0 0 2px var(--critical) inset, 0 0 0 5px var(--critical-soft); }
+  .layout { grid-template-columns: 240px 1fr; }
+  /* the save bar floats up as a glass capsule */
+  .savebar { left: 16px; right: 16px; bottom: 16px; max-width: 760px; margin: 0 auto; border: none; border-radius: 999px; padding: 10px 10px 10px 22px;
+    background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+    box-shadow: var(--depth), 0 24px 60px -16px rgba(0,0,0,.35); transform: translateY(calc(100% + 32px)); transition: transform .35s cubic-bezier(.2,.8,.2,1); }
+  .savebar.show { transform: none; }
+  .toast { bottom: 96px; }
+  .toast button { color: var(--brand); }
+  @media (max-width: 900px) {
+    html { scroll-padding-top: 150px; }
+    .layout { padding-top: 12px; grid-template-columns: 1fr; }
+    nav.sections { top: 76px; background: var(--glass-strong); margin: 0; padding: 6px; border-radius: 999px; border: none; }
+    nav.sections a { border: none; background: none; border-radius: 999px; }
+    .savebar { border-radius: 22px; padding: 10px 10px 10px 16px; }
+  }
 </style>
 </head>
 <body>
+<div class="backdrop" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
 <header>
+ <div class="ornament">
+  <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10Z"/></svg></div>
   <h1>Kinvesper <span>· settings</span></h1>
   <div class="spacer"></div>
   <a class="btn" id="back" href="/dashboard" title="Back to the dashboard">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
     <span class="label">Dashboard</span>
   </a>
+ </div>
 </header>
 <div class="layout">
   <nav class="sections" id="nav" aria-label="Settings sections"></nav>
@@ -544,6 +682,16 @@
     })
     .catch((e) => $("main").replaceChildren(h("p", { class: "empty" }, `Couldn't load settings: ${e.message}`)));
 })();
+</script>
+<script>
+  // The glow on a glass panel follows the pointer, the way a Vision Pro panel lights up where you look.
+  document.addEventListener("pointermove", (e) => {
+    const c = e.target.closest && e.target.closest(".card");
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    c.style.setProperty("--mx", `${e.clientX - r.left}px`);
+    c.style.setProperty("--my", `${e.clientY - r.top}px`);
+  }, { passive: true });
 </script>
 </body>
 </html>
