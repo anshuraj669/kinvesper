@@ -159,12 +159,15 @@ class CareService:
             items = [r for r in items if r.status == "scheduled"]
         return sorted(items, key=lambda r: r.at)
 
-    async def add_reminder(self, text: str, at: str, important: bool = False) -> ReminderResult:
+    async def add_reminder(self, text: str, at: str = "", important: bool = False,
+                           in_minutes: int | None = None) -> ReminderResult:
         current = now()
         try:
-            due = when.local(datetime.fromisoformat(at))
+            due = current + timedelta(minutes=in_minutes) if in_minutes else when.local(datetime.fromisoformat(at))
         except ValueError:
             return ReminderResult(message="I didn't catch the time. When should I remind you?")
+        if current - timedelta(minutes=2) < due <= current + timedelta(seconds=30):
+            due = current + timedelta(minutes=1)  # "in a minute", worked out from a clock that shows no seconds
         text = text.strip().rstrip(".")
         if not text:
             return ReminderResult(message="What should I remind you about?")

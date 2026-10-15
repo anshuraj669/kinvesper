@@ -127,6 +127,19 @@ async def test_one_off_reminder(service, clock):
     assert "time" in (await service.add_reminder("x", "tomorrowish")).message
 
 
+async def test_reminder_in_a_minute(service, clock):
+    """'In a minute' counts from the real clock, not the [Now] line, which shows no seconds."""
+    clock["t"] = clock["t"].replace(second=45)
+    exact = await service.add_reminder("drink water", in_minutes=10)
+    assert exact.reminder.at.startswith("2026-10-14T14:10") and "at 2:10 PM today" in exact.message
+    rounded = await service.add_reminder("stretch", "2026-10-14T14:01")  # 15 seconds away
+    assert rounded.reminder is not None and "2:01 PM" in rounded.message
+    late = await service.add_reminder("stretch", "2026-10-14T14:00")  # this minute, already begun
+    assert late.reminder is not None
+    short = await service.add_reminder("doctor", "2026-10-14T14:20", important=True)
+    assert "30 minutes before" not in short.message and "let Priya know" in short.message
+
+
 async def test_cancel_by_what_it_is_about(service, clock):
     await service.add_reminder("call Priya", "2026-10-14T17:00")
     await service.add_reminder("doctor's appointment", "2026-10-16T10:00", important=True)

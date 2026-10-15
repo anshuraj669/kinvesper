@@ -292,18 +292,19 @@ def build_server(service: CareService) -> KinvesperMCP:
             "Remind the person about something once, at a time: 'remind me to call Priya at 5', 'in 2 hours check "
             "the oven'. Set important=true for an alarm about something that matters (a doctor's appointment, a "
             "flight, a visitor): it also reminds them 30 minutes before, rings until stopped when it's close, and "
-            "tells the caregiver at the time. Work out `at` from the [Now] line. Not for daily pills: those "
-            "reminders come from the medicine schedule."
+            "tells the caregiver at the time. For 'in 10 minutes' or 'in 2 hours' pass in_minutes; otherwise work "
+            "out `at` from the [Now] line. Not for daily pills: those reminders come from the medicine schedule."
         ),
         annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False),
     )
     async def set_reminder(
         what: Annotated[str, Field(description="A short phrase, e.g. 'call Priya', 'doctor's appointment'")],
-        at: Annotated[str, Field(description="Local date and time, ISO 8601, e.g. 2026-10-14T17:00")],
+        at: Annotated[str, Field(description="Local date and time, ISO 8601, e.g. 2026-10-14T17:00")] = "",
         important: Annotated[bool, Field(description="An alarm for something important")] = False,
+        in_minutes: Annotated[int | None, Field(description="Instead of `at`: this many minutes from now", ge=1)] = None,
     ) -> ReminderResult:
         service.touch_activity()  # any interaction counts as activity
-        return await service.add_reminder(what, at, important)
+        return await service.add_reminder(what, at, important, in_minutes)
 
     @mcp.tool(
         title="Reminders",
