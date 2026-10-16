@@ -69,6 +69,8 @@ class Settings:
     twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
     twilio_from: str = field(default_factory=lambda: _env("TWILIO_FROM"))
     twilio_credentials: str = field(default_factory=lambda: _env("TWILIO_CREDENTIALS"))
+    # Twilio WhatsApp sender for alerts (the sandbox number +14155238886 on a trial). Empty = no WhatsApp.
+    twilio_whatsapp_from: str = field(default_factory=lambda: _env("TWILIO_WHATSAPP_FROM"))
 
     # OAuth (Cognito) for the MCP endpoint. Empty issuer = auth disabled (local dev).
     oauth_issuer: str = field(default_factory=lambda: _env("OAUTH_ISSUER"))

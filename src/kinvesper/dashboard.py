@@ -132,6 +132,17 @@ def dashboard_routes(service: CareService) -> list[Route]:
         return Response(f'<Response><Say voice="{notify.VOICE}">{notify.escape(said)}</Say></Response>',
                         media_type="application/xml")
 
+    async def whatsapp_incoming(request: Request) -> Response:
+        """A WhatsApp message to the Twilio number (the sandbox's "When a message comes in" webhook).
+        Twilio's signature stands in for the dashboard key, and only saved contacts' numbers count."""
+        form = {k: str(v) for k, v in (await request.form()).items()}
+        url = f"{settings.public_url.rstrip('/')}{request.url.path}"
+        if not notify.twilio_signature_ok(url, form, request.headers.get("x-twilio-signature", "")):
+            return Response(status_code=403)
+        phone = form.get("From", "").removeprefix("whatsapp:")
+        answer = await service.whatsapp_reply(phone, form.get("Body", ""))
+        return Response(notify.message_twiml(answer), media_type="application/xml")
+
     async def check_interactions(request: Request) -> Response:
         if denied := guard(request):
             return denied
@@ -211,4 +222,5 @@ def dashboard_routes(service: CareService) -> list[Route]:
         Route("/api/medications/scan", scan, methods=["POST"]),
         Route("/api/medications/interactions", check_interactions, methods=["POST"]),
         Route("/api/calls/{alert_id}/ack", call_ack, methods=["POST"]),
+        Route("/api/whatsapp/incoming", whatsapp_incoming, methods=["POST"]),
     ]

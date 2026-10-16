@@ -202,6 +202,24 @@ reads the alert out and asks the caregiver to press 1, which acknowledges it on 
 (Twilio signs that request, and the server checks the signature). `VOICE_CALL_FROM` uses AWS End
 User Messaging instead, once the account's voice spending limit is raised.
 
+**WhatsApp alerts** go through Twilio too: add `TWILIO_WHATSAPP_FROM` (the sandbox number
+`+14155238886` on a trial) and run `make twilio` again. Every alert texted to the caregiver (and
+escalations to the backup contact) also arrives on WhatsApp. On the sandbox, each phone first sends
+the sandbox's `join <code>` message (Twilio console → Messaging → Try WhatsApp), and WhatsApp only
+lets the sandbox start a conversation within 24 hours of that phone's last message, so rejoin before
+a demo. With the sandbox's "When a message comes in" webhook set to `<ServiceUrl>/api/whatsapp/incoming`
+the caregiver can reply:
+
+| Reply | What happens |
+|---|---|
+| `OK` (or "on it", "done", 👍) | The newest open alert is marked handled on the dashboard |
+| `STATUS` | Today's doses taken and missed, the last check-in mood and open alerts |
+| anything else | Saved as a family message and read out on the Echo next time |
+
+Replies are Twilio-signed (checked like the call's "press 1") and only count from the caregiver's
+and backup contact's saved numbers. In production the sender is your own WhatsApp Business number
+instead of the shared sandbox one.
+
 The dashboard also has **Ask Kinvesper** (Claude answers questions about the last two weeks from the
 care data, and says so when it doesn't track something), **Send a message** (read out on the Echo
 next time, with "heard" shown), **Memories** from companionship chats, and a printable **Doctor
@@ -347,7 +365,7 @@ Details and the AWS services per phase are in [PHASES.md](PHASES.md).
   trusted contacts, escalation to a backup contact, weekly report, Echo reminders, Hindi
 - [x] **Phase 7:** medicine interaction checks (FDA labels), prescription photos, Ask Kinvesper,
   daily check-in, phone calls for urgent alerts, repeated-question notes, doctor visit summary,
-  family messages, companionship and memories, Echo Show screen
+  family messages, companionship and memories, Echo Show screen, WhatsApp alerts with replies (Twilio)
 - [ ] **Next:** multi-family accounts, Alexa+ add-on (waiting on the allowlist)
 
 ## License

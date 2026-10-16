@@ -390,7 +390,7 @@ def twilio(monkeypatch):
     placed = []
 
     def api(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == f"/2010-04-01/Accounts/{SID}/Calls.json"
+        assert request.url.path in (f"/2010-04-01/Accounts/{SID}/Calls.json", f"/2010-04-01/Accounts/{SID}/Messages.json")
         placed.append({k: v[0] for k, v in parse_qs(request.content.decode()).items()})
         return httpx.Response(201, json={"sid": "CA123", "status": "queued"})
 
@@ -416,7 +416,7 @@ async def test_twilio_call_reads_the_alert_and_offers_press_1(service, twilio):
     p.caregiver_phone = "+919811112222"
     service.store.save("profile", p, id="main")
     result = await service.emergency("I fell in the kitchen")
-    call = twilio[0]
+    call = next(c for c in twilio if "Twiml" in c)
     assert call["To"] == "+919811112222" and call["From"] == "+15005550006"
     assert "I fell in the kitchen" in call["Twiml"] and "Press 1" in call["Twiml"]
     assert f'action="https://kinvesper.example.com/api/calls/{result.alert_id}/ack"' in call["Twiml"]
@@ -444,3 +444,69 @@ async def test_twilio_trial_refusal_is_not_fatal(service, twilio, monkeypatch):
     monkeypatch.setattr(notify, "_twilio_transport", httpx.MockTransport(
         lambda r: httpx.Response(400, json={"message": "The number is unverified. Trial accounts may only make calls to verified numbers."})))
     assert not await notify.call("+919811112222", "hello")
+
+
+@pytest.fixture
+def whatsapp(twilio, monkeypatch):
+    import dataclasses
+    config = dataclasses.replace(notify.settings, twilio_credentials=f"{SID}:{TOKEN}:+15005550006:+14155238886")
+    monkeypatch.setattr(notify, "settings", config)
+    monkeypatch.setattr(service_module, "settings", config)
+    monkeypatch.setattr("kinvesper.dashboard.settings", config)
+    return twilio
+
+
+async def test_alerts_also_go_out_on_whatsapp(service, whatsapp):
+    p = service.profile()
+    p.caregiver_phone = "+919811112222"
+    service.store.save("profile", p, id="main")
+    alert = await service.raise_alert("warning", "missed_dose", "Missed Metformin", "The 8 AM dose wasn't taken.")
+    msg = next(m for m in whatsapp if "Body" in m)
+    assert msg["To"] == "whatsapp:+919811112222" and msg["From"] == "whatsapp:+14155238886"
+    assert "*Kinvesper: Missed Metformin*" in msg["Body"] and "Reply OK" in msg["Body"]
+    assert alert.notified and notify.whatsapp_enabled()
+    assert (await service.settings_view())["whatsapp"] == "+14155238886"
+
+
+def test_whatsapp_is_off_without_a_sender(twilio):
+    assert not notify.whatsapp_enabled() and notify.calls_enabled()
+
+
+def _whatsapp_client(service):
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from kinvesper.dashboard import dashboard_routes
+    client = TestClient(Starlette(routes=dashboard_routes(service)))
+
+    def reply(text: str, sender: str = "+919811112222", signed: bool = True):
+        params = {"From": f"whatsapp:{sender}", "Body": text, "MessageSid": "SM1"}
+        sig = _sign("https://kinvesper.example.com/api/whatsapp/incoming", params) if signed else "nope"
+        return client.post("/api/whatsapp/incoming", data=params, headers={"X-Twilio-Signature": sig})
+    return reply
+
+
+def test_whatsapp_replies_acknowledge_report_and_pass_messages_on(service, whatsapp):
+    import asyncio
+    p = service.profile()
+    p.caregiver_phone = "+919811112222"
+    service.store.save("profile", p, id="main")
+    alert = asyncio.run(service.raise_alert("urgent", "emergency", "EMERGENCY: fell", "fell", sms=False))
+    reply = _whatsapp_client(service)
+
+    assert reply("OK", signed=False).status_code == 403
+    assert not service.store.load("alert", alert.id, service_module.Alert).acknowledged
+
+    r = reply("Ok!")
+    assert r.status_code == 200 and "Marked as handled: EMERGENCY: fell" in r.text and "<Message>" in r.text
+    assert service.store.load("alert", alert.id, service_module.Alert).acknowledged
+
+    assert "doses taken" in reply("Status").text and "No open alerts" in reply("status").text
+
+    r = reply("Love you Mum, see you on Sunday")
+    assert "read your message" in r.text
+    msg = service.family_messages()[0]
+    assert msg.text == "Love you Mum, see you on Sunday" and msg.sender == p.caregiver_name
+
+    stranger = reply("OK", sender="+15550001111")
+    assert "isn't a Kinvesper contact" in stranger.text and len(service.family_messages()) == 1

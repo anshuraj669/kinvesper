@@ -102,6 +102,8 @@ PROFILE_FIELDS = ("patient_name", "preferred_name", "caregiver_name", "caregiver
                   "caregiver_phone", "caregiver_email", "backup_name", "backup_phone", "backup_email", "pharmacy_name",
                   "emergency_number", "checkin_time")
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+ACK_WORDS = {"ok", "okay", "k", "1", "yes", "on it", "i'm on it", "im on it", "got it", "done", "handled", "seen", "👍"}
+STATUS_WORDS = {"status", "update", "today", "how is she", "how is he", "how is mum", "how is mom", "how is dad", "?"}
 IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
 # Companionship: gentle questions about their life, one at a time. What they share is kept for the family.
 STARTERS = [
@@ -319,6 +321,7 @@ class CareService:
             "checkin_grace_min": settings.checkin_grace_min,
             "sms": bool(p.caregiver_phone),
             "calls": notify.calls_enabled(),
+            "whatsapp": notify.whatsapp_from(),
             "scan": llm.enabled(),
         }
 
@@ -618,7 +621,7 @@ class CareService:
         if sms if sms is not None else level != "info":
             p = self.profile()
             alert.notified = await notify.send(f"Kinvesper: {title}", f"{detail}\n— about {p.patient_name}",
-                                               phone=p.caregiver_phone)
+                                               phone=p.caregiver_phone, ack=True)
         self.store.save("alert", alert)
         return alert
 
@@ -807,7 +810,7 @@ class CareService:
                 f"{p.backup_name}, this urgent alert about {p.patient_name} hasn't been answered by "
                 f"{p.caregiver_name} for {minutes} minutes:\n\n{a.title}\n{a.detail}\n\n"
                 f"Please check on {p.preferred_name} or reach {p.caregiver_name}.",
-                phone=p.backup_phone, audience="backup")
+                phone=p.backup_phone, audience="backup", ack=True)
             await notify.call(p.backup_phone, self._call_text(a, p, f"{p.caregiver_name} hasn't answered it."), self._ack_url(a))
             a.escalated_at = current.isoformat()
             self.store.save("alert", a)
@@ -864,6 +867,42 @@ class CareService:
         alert.acknowledged = True  # informational: nothing to act on
         self.store.save("alert", alert)
         return alert
+
+    # ---------- WhatsApp replies ----------
+
+    async def whatsapp_reply(self, phone: str, text: str) -> str:
+        """A WhatsApp message from the caregiver or the backup contact; returns the answer to send back.
+        OK acknowledges the newest open alert, STATUS sums up today, anything else is read out on the Echo."""
+        p = self.profile()
+        senders = {p.caregiver_phone: p.caregiver_name, p.backup_phone: p.backup_name or "your family"}
+        senders.pop("", None)
+        if phone not in senders:
+            return "This number isn't a Kinvesper contact. The caregiver can add it in the dashboard's Settings."
+        who, said = senders[phone], " ".join(text.split())
+        word = said.lower().strip(" .!")
+        if word in ACK_WORDS:
+            open_alerts = [a for a in self.alerts(include_acknowledged=False) if a.level != "info"]
+            if not open_alerts:
+                return "Thanks. There are no open alerts right now."
+            a = open_alerts[0]
+            self.acknowledge(a.id)
+            rest = len(open_alerts) - 1
+            return (f"Thanks {who}. Marked as handled: {a.title}."
+                    + (f" {rest} more {'is' if rest == 1 else 'are'} still open in the dashboard." if rest else ""))
+        if word in STATUS_WORDS:
+            day = self.schedule()
+            taken = sum(i.status == "taken" for i in day.items)
+            missed = [i.medication for i in day.items if i.status == "missed"]
+            open_n = sum(a.level != "info" for a in self.alerts(include_acknowledged=False))
+            checkin = (self.checkins(1) or [None])[-1]
+            return (f"{p.preferred_name} today: {taken} of {len(day.items)} doses taken"
+                    + (f", missed {', '.join(missed)}" if missed else "") + ". "
+                    + (f"Last check-in: feeling {checkin.mood}. " if checkin and checkin.mood else "")
+                    + (f"{open_n} alert{'s' if open_n != 1 else ''} open." if open_n else "No open alerts."))
+        if not said:
+            return ""
+        self.send_family_message(said, sender=who)
+        return f"Got it. Kinvesper will read your message to {p.preferred_name} the next time they talk to Alexa."
 
     # ---------- medicine interactions ----------
 
@@ -982,11 +1021,11 @@ class CareService:
         items = sorted(self.store.load_all("message", FamilyMessage), key=lambda m: m.created_at, reverse=True)
         return [m for m in items if not m.heard_at] if unheard_only else items
 
-    def send_family_message(self, text: str) -> FamilyMessage:
+    def send_family_message(self, text: str, sender: str = "") -> FamilyMessage:
         text = text.strip()
         if not text:
             raise SettingsError("Write a message first.")
-        msg = FamilyMessage(sender=self.profile().caregiver_name, text=text[:500], created_at=now().isoformat())
+        msg = FamilyMessage(sender=sender or self.profile().caregiver_name, text=text[:500], created_at=now().isoformat())
         self.store.save("message", msg)
         return msg
 
@@ -1149,7 +1188,8 @@ class CareService:
             "reminders": [r.model_dump() for r in self.reminders()[:10]],
             "latest_report": next((a.model_dump() for a in self.alerts() if a.kind == "report"), None),
             "alerts_reach": {"phone": bool(p.caregiver_phone), "email": bool(p.caregiver_email),
-                             "backup": bool(p.backup_phone or p.backup_email), "calls": notify.calls_enabled() and bool(p.caregiver_phone)},
+                             "backup": bool(p.backup_phone or p.backup_email), "calls": notify.calls_enabled() and bool(p.caregiver_phone),
+                             "whatsapp": notify.whatsapp_enabled() and bool(p.caregiver_phone)},
             "family_messages": [m.model_dump() for m in self.family_messages()[:5]],
             "memories": [m.model_dump() for m in self.memories()[:6]],
             "ask_enabled": llm.enabled(),

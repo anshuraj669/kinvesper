@@ -372,6 +372,11 @@
     for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) el.append(kid);
     return el;
   }
+  function whatsappNote(number) {
+    const pretty = number.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "+1 $1 $2 $3");
+    return note("good", `Alerts also arrive on WhatsApp from ${pretty}. On a Twilio trial, first send that number the sandbox's "join …" code (Twilio console → Messaging → Try WhatsApp) from this phone. Reply OK to mark an alert handled, STATUS for today, or anything else to have it read out on the Echo.`);
+  }
+
   function note(tone, text) {
     return h("div", { class: "note" }, h("span", { html: `<svg viewBox="0 0 14 14" aria-hidden="true">${ICONS[tone]}</svg>` }), text);
   }
@@ -682,6 +687,7 @@
           ? note("good", `Urgent alerts also ring this phone: right away for an emergency, and after a few minutes for anything urgent nobody has acknowledged.`)
           : note("muted", "Phone calls for urgent alerts aren't switched on for this server yet (it needs a calling number). Texts and email still go out."))
           : null,
+        p.caregiver_phone && state.whatsapp ? whatsappNote(state.whatsapp) : null,
         h("div", { class: "actions-row" },
           h("button", { class: "btn", type: "button", onclick: (e) => run(e, "/api/settings/test-alert", "Sending…",
             (r) => r.sent ? "Test alert sent. Check the phone and inbox." : "Nothing was sent: there's no phone or email to send to here.") }, "Send a test alert"),

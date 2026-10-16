@@ -30,7 +30,7 @@ def clock(monkeypatch):
 def texts(monkeypatch):
     sent = []
 
-    async def fake_send(subject, body, phone=""):
+    async def fake_send(subject, body, phone="", **_):
         sent.append(subject)
         return True
 
