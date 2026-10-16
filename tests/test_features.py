@@ -534,3 +534,22 @@ async def test_whatsapp_falls_back_to_the_template_outside_the_24_hour_window(se
     template = sent[-1]
     assert template["ContentSid"] == "HX" + "a" * 32 and "Body" not in template
     assert json.loads(template["ContentVariables"]) == {"1": "Missed Metformin", "2": "The 8 AM dose wasn't taken."}
+
+
+def test_test_alert_also_rings_the_caregiver_and_press_1_works(service, twilio):
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from kinvesper.dashboard import dashboard_routes
+    p = service.profile()
+    p.caregiver_phone = "+919811112222"
+    service.store.save("profile", p, id="main")
+    client = TestClient(Starlette(routes=dashboard_routes(service)))
+    r = client.post("/api/settings/test-alert").json()
+    assert r["called"] and r["sent"]
+    call = next(c for c in twilio if "Twiml" in c)
+    assert "testing alert calls" in call["Twiml"] and "Press 1" in call["Twiml"]
+    alert = next(a for a in service.alerts() if a.kind == "test")
+    path, params = f"/api/calls/{alert.id}/ack", {"Digits": "1"}
+    said = client.post(path, data=params, headers={"X-Twilio-Signature": _sign(f"https://kinvesper.example.com{path}", params)})
+    assert "Alert calls are working" in said.text

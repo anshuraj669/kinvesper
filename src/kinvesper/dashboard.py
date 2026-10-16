@@ -127,7 +127,8 @@ def dashboard_routes(service: CareService) -> list[Route]:
             return Response(status_code=403)
         alert = service.acknowledge(request.path_params["alert_id"]) if form.get("Digits") == "1" else None
         p = service.profile()
-        said = (f"Thank you. The alert is marked as handled. Please check on {p.preferred_name}." if alert
+        said = ("Thank you. Alert calls are working, and pressing 1 marks an alert as handled. Goodbye." if alert and alert.kind == "test"
+                else f"Thank you. The alert is marked as handled. Please check on {p.preferred_name}." if alert
                 else "Okay. The alert is still open in the Kinvesper dashboard. Goodbye.")
         return Response(f'<Response><Say voice="{notify.VOICE}">{notify.escape(said)}</Say></Response>',
                         media_type="application/xml")
@@ -176,8 +177,8 @@ def dashboard_routes(service: CareService) -> list[Route]:
     async def test_alert(request: Request) -> Response:
         if denied := guard(request):
             return denied
-        alert = await service.send_test_alert()
-        return JSONResponse({"sent": alert.notified, **await service.settings_view()})
+        alert, called = await service.send_test_alert()
+        return JSONResponse({"sent": alert.notified or called, "called": called, **await service.settings_view()})
 
     async def data(request: Request) -> Response:
         if denied := guard(request):

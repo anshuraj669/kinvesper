@@ -374,11 +374,16 @@ class CareService:
         before = {interactions.base_name(m.name) for m in current.values() if m.active}
         return {**await self.settings_view(), "added": [m.name for m in meds if interactions.base_name(m.name) not in before]}
 
-    async def send_test_alert(self) -> Alert:
+    async def send_test_alert(self) -> tuple[Alert, bool]:
+        """A test text and email, and (with calls set up) a test call; pressing 1 on it marks the test handled."""
         p = self.profile()
-        return await self.raise_alert(
+        alert = await self.raise_alert(
             "info", "test", "Test alert",
             f"This is how Kinvesper will reach you, {p.caregiver_name}, when something needs your attention.", sms=True)
+        called = await notify.call(
+            p.caregiver_phone, f"Hello {p.caregiver_name}, this is Kinvesper testing alert calls. Nothing is wrong with "
+            f"{p.preferred_name}. When there's an emergency, a call like this reads out what happened.", self._ack_url(alert))
+        return alert, called
 
     @staticmethod
     def _contact(data: dict) -> TrustedContact:
