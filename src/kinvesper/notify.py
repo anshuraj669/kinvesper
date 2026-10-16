@@ -3,8 +3,10 @@
 - Urgent alerts also ring the caregiver's phone: a spoken call through Twilio (TWILIO_*; pressing 1
   acknowledges the alert), or AWS End User Messaging SMS and Voice (VOICE_CALL_FROM, one-way). With
   neither, no calls.
-- WhatsApp, through Twilio (TWILIO_WHATSAPP_FROM: the sandbox number +14155238886 on a trial, where each
-  phone first sends the sandbox's "join ..." code). The caregiver can reply: see service.whatsapp_reply.
+- WhatsApp, through Twilio (TWILIO_WHATSAPP_FROM: the sandbox number +14155238886, where each phone first
+  sends the sandbox's "join ..." code, or your own WhatsApp sender). A free trial can't send it: its
+  "Try out WhatsApp" sender only sends Twilio's sample templates. The caregiver can reply: see
+  service.whatsapp_reply.
 
 - Phone: a text straight to the number (sns.publish PhoneNumber=...). A new AWS account's SMS sandbox
   only delivers to verified numbers.
@@ -72,7 +74,7 @@ async def send(subject: str, body: str, phone: str = "", audience: Audience = "c
         sent = False
     if phone and whatsapp_enabled():
         tail = "\n\n_Reply OK when you're on it, STATUS for today, or anything else to have it read out on the Echo._" if ack else ""
-        sent = await whatsapp(phone, f"*{subject}*\n{body}{tail}") or sent
+        sent = await whatsapp(phone, f"*{subject}*\n{body}{tail}", subject.removeprefix("Kinvesper: "), body) or sent
     return sent
 
 
@@ -128,32 +130,34 @@ VOICE = "Polly.Joanna"  # Twilio speaks with Amazon Polly voices too
 _twilio_transport: httpx.AsyncBaseTransport | None = None  # tests swap in a fake Twilio
 
 
-def _twilio_parts() -> tuple[str, str, str, str]:
-    """(account SID, auth token, calling number, WhatsApp number), from TWILIO_CREDENTIALS
-    ("AC...:token:+1...[:+1...]") or the separate variables. Missing parts are empty."""
-    parts = [settings.twilio_account_sid, settings.twilio_auth_token, settings.twilio_from, settings.twilio_whatsapp_from]
+def _twilio_parts() -> tuple[str, str, str, str, str]:
+    """(account SID, auth token, calling number, WhatsApp number, WhatsApp template SID), from
+    TWILIO_CREDENTIALS ("AC...:token:+1...[:+1...[:HX...]]") or the separate variables. Missing parts are empty."""
+    parts = [settings.twilio_account_sid, settings.twilio_auth_token, settings.twilio_from,
+             settings.twilio_whatsapp_from, settings.twilio_whatsapp_template]
     if settings.twilio_credentials.count(":") >= 2:
-        given = [x.strip() for x in settings.twilio_credentials.split(":")]
-        parts = [*given[:4], *[""] * (4 - len(given[:4]))]
+        given = [x.strip() for x in settings.twilio_credentials.split(":")][:5]
+        parts = [*given, *[""] * (5 - len(given))]
         parts[3] = parts[3] or settings.twilio_whatsapp_from
-    sid, token, sender, wa = parts
-    return sid, token, sender, wa.removeprefix("whatsapp:").replace(" ", "")
+        parts[4] = parts[4] or settings.twilio_whatsapp_template
+    sid, token, sender, wa, template = parts
+    return sid, token, sender, wa.removeprefix("whatsapp:").replace(" ", ""), template
 
 
 def twilio_account() -> tuple[str, str] | None:
-    sid, token, _, _ = _twilio_parts()
+    sid, token, *_ = _twilio_parts()
     return (sid, token) if sid.startswith("AC") and token else None
 
 
 def twilio() -> tuple[str, str, str] | None:
     """(account SID, auth token, from number) when Twilio calls are set up."""
-    sid, token, sender, _ = _twilio_parts()
+    sid, token, sender, *_ = _twilio_parts()
     return (sid, token, sender) if twilio_account() and PHONE.match(sender) else None
 
 
 def whatsapp_from() -> str:
     """The Twilio WhatsApp sender (E.164), or "" when WhatsApp isn't set up."""
-    _, _, _, wa = _twilio_parts()
+    wa = _twilio_parts()[3]
     return wa if twilio_account() and PHONE.match(wa) else ""
 
 
@@ -196,22 +200,47 @@ async def _twilio_call(phone: str, text: str, ack_url: str) -> None:
         raise RuntimeError(f"Twilio {r.status_code}: {r.json().get('message', r.text[:200]) if r.content else ''}")
 
 
-async def whatsapp(phone: str, text: str) -> bool:
-    """A WhatsApp message to `phone` from the Twilio WhatsApp sender. True when Twilio accepted it."""
-    sender, creds = whatsapp_from(), twilio_account()
+# Twilio's answers when free text isn't allowed: outside the 24-hour window (63016), or a sender that
+# only sends templates (21654, "ContentSid Required").
+NEEDS_TEMPLATE = (63016, 21654)
+
+
+def _template_param(text: str, limit: int) -> str:
+    """WhatsApp template values can't hold new lines, tabs or runs of spaces."""
+    return " ".join(text.replace("*", "").split())[:limit] or "-"
+
+
+async def whatsapp(phone: str, text: str, title: str = "", detail: str = "") -> bool:
+    """A WhatsApp message to `phone` from the Twilio WhatsApp sender: free text, or, when WhatsApp only
+    allows a template right now, the approved template with `title` and `detail` filled in."""
+    sender, creds, template = whatsapp_from(), twilio_account(), _twilio_parts()[4]
     if not (sender and creds and PHONE.match(phone)):
         return False
     sid, token = creds
+    base = {"To": f"whatsapp:{phone}", "From": f"whatsapp:{sender}"}
     try:
         async with httpx.AsyncClient(timeout=10, auth=(sid, token), transport=_twilio_transport) as http:
-            r = await http.post(f"{TWILIO_API}/Accounts/{sid}/Messages.json",
-                                data={"To": f"whatsapp:{phone}", "From": f"whatsapp:{sender}", "Body": text[:1500]})
+            url = f"{TWILIO_API}/Accounts/{sid}/Messages.json"
+            r = await http.post(url, data={**base, "Body": text[:1500]})
+            if r.status_code >= 300 and template.startswith("HX") and _error_code(r) in NEEDS_TEMPLATE:
+                variables = {"1": _template_param(title or text, 200), "2": _template_param(detail or text, 800)}
+                r = await http.post(url, data={**base, "ContentSid": template, "ContentVariables": json.dumps(variables)})
         if r.status_code >= 300:  # e.g. a phone that hasn't joined the sandbox
             raise RuntimeError(f"Twilio {r.status_code}: {r.json().get('message', r.text[:200]) if r.content else ''}")
         return True
     except Exception as e:
         log.warning("WhatsApp to ...%s failed: %s", phone[-4:], e)
         return False
+
+
+def _error_code(r: httpx.Response) -> int | None:
+    try:
+        code = r.json().get("code")
+        if not code and "contentsid" in str(r.json().get("message", "")).lower():
+            return 21654
+        return int(code) if code else None
+    except ValueError:
+        return None
 
 
 def message_twiml(text: str) -> str:

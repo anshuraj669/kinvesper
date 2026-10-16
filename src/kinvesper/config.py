@@ -71,6 +71,9 @@ class Settings:
     twilio_credentials: str = field(default_factory=lambda: _env("TWILIO_CREDENTIALS"))
     # Twilio WhatsApp sender for alerts (the sandbox number +14155238886 on a trial). Empty = no WhatsApp.
     twilio_whatsapp_from: str = field(default_factory=lambda: _env("TWILIO_WHATSAPP_FROM"))
+    # An approved WhatsApp template (HX..., body like "Kinvesper alert: {{1}}. {{2}}") for alerts sent
+    # more than 24 hours after the caregiver's last WhatsApp message, when free text isn't allowed.
+    twilio_whatsapp_template: str = field(default_factory=lambda: _env("TWILIO_WHATSAPP_TEMPLATE"))
 
     # OAuth (Cognito) for the MCP endpoint. Empty issuer = auth disabled (local dev).
     oauth_issuer: str = field(default_factory=lambda: _env("OAUTH_ISSUER"))

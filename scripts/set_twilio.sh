@@ -26,26 +26,28 @@ secret=$(output TwilioSecret) || die "stack '$STACK' not found in $AWS_REGION"
 [[ -n "$secret" && "$secret" != "None" ]] || die "redeploy the stack first: it has no TwilioSecret output"
 service=$(output ServiceArn)
 
-sid="${TWILIO_ACCOUNT_SID:-}" token="${TWILIO_AUTH_TOKEN:-}" from="${TWILIO_FROM:-}" wa="${TWILIO_WHATSAPP_FROM:-}"
+sid="${TWILIO_ACCOUNT_SID:-}" token="${TWILIO_AUTH_TOKEN:-}" from="${TWILIO_FROM:-}" wa="${TWILIO_WHATSAPP_FROM:-}" tpl="${TWILIO_WHATSAPP_TEMPLATE:-}"
 [[ -n "$sid" ]] || read -rp "Twilio Account SID (AC...): " sid
 [[ -n "$token" ]] || { read -rsp "Twilio Auth Token: " token; echo; }
-[[ -n "$from" ]] || read -rp "Twilio phone number (+1...): " from
+[[ -n "$from" || -n "$wa" ]] || read -rp "Twilio phone number (+1...): " from
 from="${from//[ -]/}" wa="${wa#whatsapp:}" wa="${wa//[ -]/}"
 [[ "$sid" =~ ^AC[0-9a-f]{32}$ ]] || die "the Account SID starts with AC and has 32 more characters"
 [[ "$token" =~ ^[0-9a-f]{32}$ ]] || die "the Auth Token is 32 letters and digits (Twilio console, Account info)"
-[[ "$from" =~ ^\+[1-9][0-9]{7,14}$ ]] || die "the Twilio number needs + and the country code, like +15551234567"
+[[ -z "$from" && -n "$wa" || "$from" =~ ^\+[1-9][0-9]{7,14}$ ]] || die "the Twilio number needs + and the country code, like +15551234567"
+[[ -z "$tpl" || "$tpl" =~ ^HX[0-9a-f]{32}$ ]] || die "TWILIO_WHATSAPP_TEMPLATE is a Content template SID: HX and 32 more characters"
 [[ -z "$wa" || "$wa" =~ ^\+[1-9][0-9]{7,14}$ ]] || die "TWILIO_WHATSAPP_FROM needs + and the country code, like +14155238886"
-echo "Using Twilio account ...${sid: -4}, calling from $from${wa:+, WhatsApp from $wa}."
+echo "Using Twilio account ...${sid: -4}, $([[ -n "$from" ]] && echo "calling from $from" || echo "no calls (no TWILIO_FROM)")${wa:+, WhatsApp from $wa}${tpl:+ (template ...${tpl: -4})}."
 
 # Through a private temp file, so the token never appears in the process list.
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 chmod 600 "$tmp"
-printf '{"SecretId": "%s", "SecretString": "%s:%s:%s:%s"}' "$secret" "$sid" "$token" "$from" "$wa" > "$tmp"
+printf '{"SecretId": "%s", "SecretString": "%s:%s:%s:%s:%s"}' "$secret" "$sid" "$token" "$from" "$wa" "$tpl" > "$tmp"
 aws secretsmanager put-secret-value --cli-input-json "file://$tmp" >/dev/null
 echo "Stored. Restarting the service (takes about 3 minutes)..."
 aws apprunner start-deployment --service-arn "$service" --query OperationId --output text >/dev/null
-echo "Done. Urgent alerts will ring the caregiver's phone once the service is running again."
+[[ -n "$from" ]] && echo "Done. Urgent alerts will ring the caregiver's phone once the service is running again."
+[[ -n "$from" ]] || echo "Done. Add TWILIO_FROM and run this again to switch on phone calls too."
 if [[ -n "$wa" ]]; then
   url=$(output ServiceUrl)
   echo

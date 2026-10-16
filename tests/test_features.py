@@ -510,3 +510,27 @@ def test_whatsapp_replies_acknowledge_report_and_pass_messages_on(service, whats
 
     stranger = reply("OK", sender="+15550001111")
     assert "isn't a Kinvesper contact" in stranger.text and len(service.family_messages()) == 1
+
+
+async def test_whatsapp_falls_back_to_the_template_outside_the_24_hour_window(service, monkeypatch):
+    import dataclasses
+    import json
+    from urllib.parse import parse_qs
+
+    sent = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
+        sent.append(form)
+        if "Body" in form:
+            return httpx.Response(400, json={"code": 63016, "message": "Failed to send freeform message outside the window"})
+        return httpx.Response(201, json={"sid": "SM1"})
+
+    config = dataclasses.replace(notify.settings, twilio_credentials=f"{SID}:{TOKEN}::+14155238886:HX{'a' * 32}")
+    monkeypatch.setattr(notify, "settings", config)
+    monkeypatch.setattr(notify, "_twilio_transport", httpx.MockTransport(api))
+    assert not notify.calls_enabled() and notify.whatsapp_enabled()
+    assert await notify.send("Kinvesper: Missed Metformin", "The 8 AM dose\nwasn't taken.", phone="+919811112222", ack=True)
+    template = sent[-1]
+    assert template["ContentSid"] == "HX" + "a" * 32 and "Body" not in template
+    assert json.loads(template["ContentVariables"]) == {"1": "Missed Metformin", "2": "The 8 AM dose wasn't taken."}

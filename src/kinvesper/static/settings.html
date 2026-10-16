@@ -374,7 +374,7 @@
   }
   function whatsappNote(number) {
     const pretty = number.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "+1 $1 $2 $3");
-    return note("good", `Alerts also arrive on WhatsApp from ${pretty}. On a Twilio trial, first send that number the sandbox's "join …" code (Twilio console → Messaging → Try WhatsApp) from this phone. Reply OK to mark an alert handled, STATUS for today, or anything else to have it read out on the Echo.`);
+    return note("good", `Alerts also arrive on WhatsApp from ${pretty}. On the Twilio sandbox, first send that number the sandbox's "join …" code from this phone. Reply OK to mark an alert handled, STATUS for today, or anything else to have it read out on the Echo.`);
   }
 
   function note(tone, text) {

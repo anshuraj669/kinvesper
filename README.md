@@ -203,11 +203,13 @@ reads the alert out and asks the caregiver to press 1, which acknowledges it on 
 User Messaging instead, once the account's voice spending limit is raised.
 
 **WhatsApp alerts** go through Twilio too: add `TWILIO_WHATSAPP_FROM` (the sandbox number
-`+14155238886` on a trial) and run `make twilio` again. Every alert texted to the caregiver (and
-escalations to the backup contact) also arrives on WhatsApp. On the sandbox, each phone first sends
-the sandbox's `join <code>` message (Twilio console → Messaging → Try WhatsApp), and WhatsApp only
-lets the sandbox start a conversation within 24 hours of that phone's last message, so rejoin before
-a demo. With the sandbox's "When a message comes in" webhook set to `<ServiceUrl>/api/whatsapp/incoming`
+`+14155238886`, or your own WhatsApp sender) and run `make twilio` again. Every alert texted to the
+caregiver (and escalations to the backup contact) also arrives on WhatsApp. This needs an upgraded
+Twilio account: a free trial's "Try out WhatsApp" sender only sends Twilio's sample templates, not
+your own text. On the sandbox, each phone first sends the sandbox's `join <code>` message. WhatsApp
+allows free text only within 24 hours of that phone's last message; after that, Kinvesper sends the
+approved template in `TWILIO_WHATSAPP_TEMPLATE` (body like `Kinvesper alert: {{1}}. {{2}}`) when
+one is set, so reply to it (or rejoin) before a demo. With the sandbox's "When a message comes in" webhook set to `<ServiceUrl>/api/whatsapp/incoming`
 the caregiver can reply:
 
 | Reply | What happens |
