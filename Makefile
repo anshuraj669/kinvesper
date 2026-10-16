@@ -1,4 +1,4 @@
-.PHONY: help dev dev-aws test seed login claude-key twilio
+.PHONY: help dev dev-aws test seed login claude-key twilio telegram telegram-local
 
 help:  ## List the commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -23,3 +23,9 @@ claude-key:  ## Store the Claude API key for the deployed voice agent (deploy wi
 
 twilio:  ## Store the Twilio credentials for urgent-alert phone calls (from .env, or asks)
 	@./scripts/set_twilio.sh
+
+telegram:  ## Connect the Telegram alerts bot to the deployed server (TELEGRAM_BOT_TOKEN in .env)
+	@uv run python telegram/setup.py
+
+telegram-local:  ## Relay the Telegram bot to the local server while it runs
+	@uv run python telegram/poll.py

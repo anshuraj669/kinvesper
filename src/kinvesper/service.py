@@ -6,12 +6,14 @@ import base64
 import difflib
 import json
 import re
+import secrets
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
+from html import escape
 
 import anyio
 
-from . import contacts, interactions, llm, notify, scam, when
+from . import contacts, interactions, llm, notify, scam, telegram, when
 from .config import now, settings
 from .models import (
     Alert,
@@ -41,8 +43,9 @@ from .models import (
     ScannedMedicine,
     ScanResult,
     ScheduleItem,
-    TrustedContact,
     ScheduleResult,
+    TelegramLink,
+    TrustedContact,
 )
 from .store import Store
 
@@ -102,6 +105,7 @@ PROFILE_FIELDS = ("patient_name", "preferred_name", "caregiver_name", "caregiver
                   "caregiver_phone", "caregiver_email", "backup_name", "backup_phone", "backup_email", "pharmacy_name",
                   "emergency_number", "checkin_time")
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+LINK_LIFETIME = timedelta(minutes=30)
 ACK_WORDS = {"ok", "okay", "k", "1", "yes", "on it", "i'm on it", "im on it", "got it", "done", "handled", "seen", "👍"}
 STATUS_WORDS = {"status", "update", "today", "how is she", "how is he", "how is mum", "how is mom", "how is dad", "?"}
 IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
@@ -321,7 +325,9 @@ class CareService:
             "checkin_grace_min": settings.checkin_grace_min,
             "sms": bool(p.caregiver_phone),
             "calls": notify.calls_enabled(),
-            "whatsapp": notify.whatsapp_from(),
+            "telegram": {"enabled": telegram.enabled(), "bot": await telegram.bot_username() if telegram.enabled() else "",
+                         "caregiver": p.caregiver_telegram_name if p.caregiver_telegram else "",
+                         "backup": p.backup_telegram_name if p.backup_telegram else ""},
             "scan": llm.enabled(),
         }
 
@@ -345,10 +351,10 @@ class CareService:
                 raise SettingsError("The daily check-in time must be 24-hour HH:MM, like 10:00.")
         if not re.fullmatch(r"\d{2,6}", fields["emergency_number"]):
             raise SettingsError("The emergency number should be the short local number, like 112, 911 or 999.")
-        if (fields["backup_phone"] or fields["backup_email"]) and not fields["backup_name"]:
+        if (fields["backup_phone"] or fields["backup_email"] or old.backup_telegram) and not fields["backup_name"]:
             raise SettingsError("Add the backup contact's name.")
-        if not (fields["caregiver_phone"] or fields["caregiver_email"]):
-            raise SettingsError("Add a phone number or an email, so alerts reach the caregiver.")
+        if not (fields["caregiver_phone"] or fields["caregiver_email"] or old.caregiver_telegram):
+            raise SettingsError("Add a phone number, an email or Telegram, so alerts reach the caregiver.")
 
         current = {m.id: m for m in self.store.load_all("med", Medication)}
         meds = [self._medication(m, current) for m in medications]
@@ -625,8 +631,8 @@ class CareService:
         alert = Alert(created_at=now().isoformat(), level=level, kind=kind, title=title, detail=detail, dedupe_key=dedupe_key)
         if sms if sms is not None else level != "info":
             p = self.profile()
-            alert.notified = await notify.send(f"Kinvesper: {title}", f"{detail}\n— about {p.patient_name}",
-                                               phone=p.caregiver_phone, ack=True)
+            sent = await notify.send(f"Kinvesper: {title}", f"{detail}\n— about {p.patient_name}", phone=p.caregiver_phone)
+            alert.notified = await self._telegram_alert(alert, p.caregiver_telegram) or sent
         self.store.save("alert", alert)
         return alert
 
@@ -803,7 +809,7 @@ class CareService:
     async def _escalate(self, current: datetime) -> None:
         """Urgent alerts nobody acknowledged in time go to the backup contact, once."""
         p = self.profile()
-        if not (p.backup_phone or p.backup_email):
+        if not (p.backup_phone or p.backup_email or p.backup_telegram):
             return
         cutoff = (current - timedelta(minutes=settings.escalate_after_min)).isoformat()
         for a in self.alerts(include_acknowledged=False):
@@ -815,7 +821,10 @@ class CareService:
                 f"{p.backup_name}, this urgent alert about {p.patient_name} hasn't been answered by "
                 f"{p.caregiver_name} for {minutes} minutes:\n\n{a.title}\n{a.detail}\n\n"
                 f"Please check on {p.preferred_name} or reach {p.caregiver_name}.",
-                phone=p.backup_phone, audience="backup", ack=True)
+                phone=p.backup_phone, audience="backup")
+            await self._telegram_alert(a, p.backup_telegram, f"Please check on {p.preferred_name}",
+                                       f"{p.caregiver_name} hasn't answered this urgent alert for {minutes} minutes:\n"
+                                       f"{a.title}\n{a.detail}")
             await notify.call(p.backup_phone, self._call_text(a, p, f"{p.caregiver_name} hasn't answered it."), self._ack_url(a))
             a.escalated_at = current.isoformat()
             self.store.save("alert", a)
@@ -868,46 +877,164 @@ class CareService:
         alert = Alert(created_at=current.isoformat(), level="info", kind="report",
                       title=f"Weekly report for {p.caregiver_name}", detail=s.narrative,
                       dedupe_key=f"report:{week.year}-W{week.week}")
-        alert.notified = await notify.send(f"Kinvesper weekly report: {p.preferred_name}", body)
+        sent = await notify.send(f"Kinvesper weekly report: {p.preferred_name}", body)
+        alert.notified = await telegram.send(p.caregiver_telegram, f"📊 <b>Weekly report: {escape(p.preferred_name)}</b>\n\n"
+                                             + escape(body.split("\n", 2)[-1].rsplit("\nOpen the Kinvesper", 1)[0])) or sent
         alert.acknowledged = True  # informational: nothing to act on
         self.store.save("alert", alert)
         return alert
 
-    # ---------- WhatsApp replies ----------
+    # ---------- Telegram ----------
 
-    async def whatsapp_reply(self, phone: str, text: str) -> str:
-        """A WhatsApp message from the caregiver or the backup contact; returns the answer to send back.
-        OK acknowledges the newest open alert, STATUS sums up today, anything else is read out on the Echo."""
+    async def telegram_link(self, audience: str) -> dict:
+        """A one-time "Connect Telegram" link for the caregiver or the backup contact."""
+        if audience not in ("caregiver", "backup"):
+            raise SettingsError("Connect Telegram for the caregiver or the backup contact.")
+        if not telegram.enabled():
+            raise SettingsError("Telegram isn't set up on this server yet (see telegram/README.md).")
+        current = now()
+        for old in self.store.load_all("tglink", TelegramLink):  # expired or replaced codes
+            if old.audience == audience or old.created_at < (current - LINK_LIFETIME).isoformat():
+                self.store.delete("tglink", old.id)
+        code = secrets.token_urlsafe(12)
+        self.store.save("tglink", TelegramLink(id=code, audience=audience, created_at=current.isoformat()), id=code)
+        if not (url := await telegram.link_url(code)):
+            raise SettingsError("Couldn't reach Telegram just now. Please try again.")
+        return {"url": url, "bot": await telegram.bot_username(), "minutes": int(LINK_LIFETIME.total_seconds() // 60)}
+
+    async def telegram_unlink(self, audience: str) -> dict:
+        if audience not in ("caregiver", "backup"):
+            raise SettingsError("Disconnect Telegram for the caregiver or the backup contact.")
         p = self.profile()
-        senders = {p.caregiver_phone: p.caregiver_name, p.backup_phone: p.backup_name or "your family"}
-        senders.pop("", None)
-        if phone not in senders:
-            return "This number isn't a Kinvesper contact. The caregiver can add it in the dashboard's Settings."
-        who, said = senders[phone], " ".join(text.split())
-        word = said.lower().strip(" .!")
+        chat = getattr(p, f"{audience}_telegram", "")
+        self.store.save("profile", p.model_copy(update={f"{audience}_telegram": "", f"{audience}_telegram_name": ""}), id="main")
+        if chat:
+            await telegram.send(chat, "You've been disconnected from Kinvesper alerts. Connect again any time from Settings.")
+        return await self.settings_view()
+
+    def _telegram_who(self, chat_id: str) -> tuple[str, str] | None:
+        """(audience, name) for a linked chat."""
+        p = self.profile()
+        if chat_id and chat_id == p.caregiver_telegram:
+            return "caregiver", p.caregiver_name
+        if chat_id and chat_id == p.backup_telegram:
+            return "backup", p.backup_name or "family"
+        return None
+
+    async def telegram_update(self, update: dict) -> None:
+        """One update from the bot: a /start link code, a button press, or a message from a linked chat."""
+        if query := update.get("callback_query"):
+            return await self._telegram_button(query)
+        msg = update.get("message") or {}
+        chat = msg.get("chat") or {}
+        if chat.get("type") != "private":
+            return
+        chat_id, text = str(chat.get("id", "")), (msg.get("text") or "").strip()
+        if text.startswith("/start"):
+            return await self._telegram_start(chat_id, text.partition(" ")[2].strip(), telegram.name_of(msg.get("from") or {}))
+        who = self._telegram_who(chat_id)
+        if not who:
+            await telegram.send(chat_id, "This chat isn't connected to Kinvesper yet. In the Kinvesper dashboard, open "
+                                         "<b>Settings</b> and press <b>Connect Telegram</b>.")
+            return
+        if text.split("@")[0].lower() == "/stop":
+            await self.telegram_unlink(who[0])
+            return
+        if not text:
+            await telegram.send(chat_id, "I can only pass on typed messages for now.")
+            return
+        answer = await self.contact_reply(who[1], text)
+        await telegram.send(chat_id, escape(answer), telegram.buttons([("📋 Status", "status")]))
+
+    async def _telegram_start(self, chat_id: str, code: str, tg_name: str) -> None:
+        p, current = self.profile(), now()
+        link = self.store.load("tglink", code, TelegramLink) if code else None
+        if link and link.created_at >= (current - LINK_LIFETIME).isoformat():
+            self.store.delete("tglink", link.id)
+            p = p.model_copy(update={f"{link.audience}_telegram": chat_id, f"{link.audience}_telegram_name": tg_name})
+            self.store.save("profile", p, id="main")
+            when_ = ("" if link.audience == "caregiver"
+                     else f" when {escape(p.caregiver_name)} hasn't answered an urgent one")
+            await telegram.send(chat_id, (
+                f"✅ <b>Connected, {escape(tg_name)}.</b>\nKinvesper will send alerts about {escape(p.patient_name)} "
+                f"here{when_}.\n\nOn an alert, tap <b>✅ I'm on it</b> to mark it handled. Tap <b>📋 Status</b> for "
+                f"today, or type a message and Kinvesper will read it to {escape(p.preferred_name)} on the Echo."),
+                telegram.buttons([("📋 Status", "status")]))
+            return
+        if self._telegram_who(chat_id):
+            await telegram.send(chat_id, "You're already connected. Type a message for "
+                                         f"{escape(p.preferred_name)}, or tap Status.", telegram.buttons([("📋 Status", "status")]))
+        elif code:
+            await telegram.send(chat_id, "That link has expired or was already used. In Kinvesper's <b>Settings</b>, "
+                                         "press <b>Connect Telegram</b> for a new one.")
+        else:
+            await telegram.send(chat_id, "Hello! This is <b>Kinvesper</b>, the family side of an Alexa care companion. "
+                                         "To get alerts here, open the Kinvesper dashboard, go to <b>Settings</b> and "
+                                         "press <b>Connect Telegram</b>.")
+
+    async def _telegram_button(self, query: dict) -> None:
+        msg = query.get("message") or {}
+        chat_id, data = str((msg.get("chat") or {}).get("id", "")), query.get("data", "")
+        who = self._telegram_who(chat_id)
+        if not who:
+            await telegram.call("answerCallbackQuery", callback_query_id=query["id"], text="This chat isn't connected to Kinvesper.")
+            return
+        if data.startswith("ack:"):
+            alert = self.store.load("alert", data[4:], Alert)
+            already = bool(alert and alert.acknowledged)
+            if alert and not already:
+                self.acknowledge(alert.id)
+            note = "Already handled" if already else "Marked as handled" if alert else "That alert is gone"
+            await telegram.call("answerCallbackQuery", callback_query_id=query["id"], text=note)
+            if alert:
+                await telegram.call("editMessageReplyMarkup", chat_id=chat_id, message_id=msg.get("message_id"),
+                                    reply_markup=telegram.buttons([(f"✅ Handled ({who[1]})" if not already else "✅ Handled", "noop"),
+                                                                   ("📋 Status", "status")]))
+            return
+        await telegram.call("answerCallbackQuery", callback_query_id=query["id"])
+        if data == "status":
+            await telegram.send(chat_id, escape(self.status_text()), telegram.buttons([("📋 Status", "status")]))
+
+    def status_text(self) -> str:
+        p, day = self.profile(), self.schedule()
+        taken = sum(i.status == "taken" for i in day.items)
+        missed = [i.medication for i in day.items if i.status == "missed"]
+        open_alerts = [a for a in self.alerts(include_acknowledged=False) if a.level != "info"]
+        checkin = (self.checkins(1) or [None])[-1]
+        lines = [f"{p.preferred_name} today: {taken} of {len(day.items)} doses taken"
+                 + (f", missed {', '.join(missed)}." if missed else ".")]
+        if checkin:
+            lines.append(f"Last check-in: feeling {checkin.mood}.")
+        lines.append(f"Open alerts: {'; '.join(a.title for a in open_alerts[:3])}." if open_alerts else "No open alerts.")
+        return "\n".join(lines)
+
+    async def contact_reply(self, who: str, text: str) -> str:
+        """A message from the caregiver or the backup contact. OK acknowledges the newest open alert,
+        STATUS sums up today, HELP explains, anything else is read out on the Echo."""
+        p, said = self.profile(), " ".join(text.split())
+        word = said.lower().split("@")[0].lstrip("/").strip(" .!")
         if word in ACK_WORDS:
             open_alerts = [a for a in self.alerts(include_acknowledged=False) if a.level != "info"]
             if not open_alerts:
                 return "Thanks. There are no open alerts right now."
-            a = open_alerts[0]
+            a, rest = open_alerts[0], len(open_alerts) - 1
             self.acknowledge(a.id)
-            rest = len(open_alerts) - 1
             return (f"Thanks {who}. Marked as handled: {a.title}."
                     + (f" {rest} more {'is' if rest == 1 else 'are'} still open in the dashboard." if rest else ""))
         if word in STATUS_WORDS:
-            day = self.schedule()
-            taken = sum(i.status == "taken" for i in day.items)
-            missed = [i.medication for i in day.items if i.status == "missed"]
-            open_n = sum(a.level != "info" for a in self.alerts(include_acknowledged=False))
-            checkin = (self.checkins(1) or [None])[-1]
-            return (f"{p.preferred_name} today: {taken} of {len(day.items)} doses taken"
-                    + (f", missed {', '.join(missed)}" if missed else "") + ". "
-                    + (f"Last check-in: feeling {checkin.mood}. " if checkin and checkin.mood else "")
-                    + (f"{open_n} alert{'s' if open_n != 1 else ''} open." if open_n else "No open alerts."))
-        if not said:
-            return ""
+            return self.status_text()
+        if word == "help":
+            return (f"Tap ✅ I'm on it on an alert (or send OK) to mark it handled. Send STATUS for today. "
+                    f"Anything else you type is read to {p.preferred_name} on the Echo. Send /stop to stop alerts here.")
         self.send_family_message(said, sender=who)
         return f"Got it. Kinvesper will read your message to {p.preferred_name} the next time they talk to Alexa."
+
+    async def _telegram_alert(self, alert: Alert, chat: str, title: str = "", detail: str = "") -> bool:
+        if not chat:
+            return False
+        p = self.profile()
+        markup = telegram.alert_buttons(alert.id) if alert.level != "info" or alert.kind == "test" else None
+        return await telegram.send(chat, telegram.alert_html(alert.level, title or alert.title, detail or alert.detail, p.patient_name), markup)
 
     # ---------- medicine interactions ----------
 
@@ -1193,8 +1320,8 @@ class CareService:
             "reminders": [r.model_dump() for r in self.reminders()[:10]],
             "latest_report": next((a.model_dump() for a in self.alerts() if a.kind == "report"), None),
             "alerts_reach": {"phone": bool(p.caregiver_phone), "email": bool(p.caregiver_email),
-                             "backup": bool(p.backup_phone or p.backup_email), "calls": notify.calls_enabled() and bool(p.caregiver_phone),
-                             "whatsapp": notify.whatsapp_enabled() and bool(p.caregiver_phone)},
+                             "backup": bool(p.backup_phone or p.backup_email or p.backup_telegram),
+                             "telegram": bool(p.caregiver_telegram), "calls": notify.calls_enabled() and bool(p.caregiver_phone)},
             "family_messages": [m.model_dump() for m in self.family_messages()[:5]],
             "memories": [m.model_dump() for m in self.memories()[:6]],
             "ask_enabled": llm.enabled(),

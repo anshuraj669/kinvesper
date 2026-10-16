@@ -560,8 +560,8 @@
 
   function setupNotice(d) {
     const reach = d.alerts_reach || {};
-    if (reach.phone || reach.email) return null;
-    const link = h("a", { class: "btn small", href: document.getElementById("settings").href }, "Add a phone or email");
+    if (reach.phone || reach.email || reach.telegram) return null;
+    const link = h("a", { class: "btn small", href: document.getElementById("settings").href }, "Add a phone, email or Telegram");
     return h("div", { class: "setup", role: "note" },
       h("strong", {}, "Alerts aren't reaching anyone yet."),
       h("span", {}, `Kinvesper can't text or email ${d.profile.caregiver_name} until a contact is saved.`), link);

@@ -202,25 +202,19 @@ reads the alert out and asks the caregiver to press 1, which acknowledges it on 
 (Twilio signs that request, and the server checks the signature). `VOICE_CALL_FROM` uses AWS End
 User Messaging instead, once the account's voice spending limit is raised.
 
-**WhatsApp alerts** go through Twilio too: add `TWILIO_WHATSAPP_FROM` (the sandbox number
-`+14155238886`, or your own WhatsApp sender) and run `make twilio` again. Every alert texted to the
-caregiver (and escalations to the backup contact) also arrives on WhatsApp. This needs an upgraded
-Twilio account: a free trial's "Try out WhatsApp" sender only sends Twilio's sample templates, not
-your own text. On the sandbox, each phone first sends the sandbox's `join <code>` message. WhatsApp
-allows free text only within 24 hours of that phone's last message; after that, Kinvesper sends the
-approved template in `TWILIO_WHATSAPP_TEMPLATE` (body like `Kinvesper alert: {{1}}. {{2}}`) when
-one is set, so reply to it (or rejoin) before a demo. With the sandbox's "When a message comes in" webhook set to `<ServiceUrl>/api/whatsapp/incoming`
-the caregiver can reply:
+**Telegram alerts** are free and need no phone verification. The Kinvesper bot lives in
+[`telegram/`](telegram/README.md): create it with @BotFather, put `TELEGRAM_BOT_TOKEN` in `.env` and
+run `make telegram`. In Settings, **Connect Telegram** opens the bot with a one-time code. After the
+caregiver presses Start, every alert arrives in that chat:
 
-| Reply | What happens |
+| In the chat | What happens |
 |---|---|
-| `OK` (or "on it", "done", 👍) | The newest open alert is marked handled on the dashboard |
-| `STATUS` | Today's doses taken and missed, the last check-in mood and open alerts |
+| **✅ I'm on it** (or `OK`) | The alert is marked handled on the dashboard |
+| **📋 Status** (or `/status`) | Today's doses taken and missed, the last check-in mood, open alerts |
 | anything else | Saved as a family message and read out on the Echo next time |
 
-Replies are Twilio-signed (checked like the call's "press 1") and only count from the caregiver's
-and backup contact's saved numbers. In production the sender is your own WhatsApp Business number
-instead of the shared sandbox one.
+The backup contact can connect too, for escalations. The weekly report goes to the caregiver's
+chat. Only linked chats count, and the webhook checks Telegram's secret header.
 
 The dashboard also has **Ask Kinvesper** (Claude answers questions about the last two weeks from the
 care data, and says so when it doesn't track something), **Send a message** (read out on the Echo
@@ -367,7 +361,7 @@ Details and the AWS services per phase are in [PHASES.md](PHASES.md).
   trusted contacts, escalation to a backup contact, weekly report, Echo reminders, Hindi
 - [x] **Phase 7:** medicine interaction checks (FDA labels), prescription photos, Ask Kinvesper,
   daily check-in, phone calls for urgent alerts, repeated-question notes, doctor visit summary,
-  family messages, companionship and memories, Echo Show screen, WhatsApp alerts with replies (Twilio)
+  family messages, companionship and memories, Echo Show screen, Telegram alerts bot
 - [ ] **Next:** multi-family accounts, Alexa+ add-on (waiting on the allowlist)
 
 ## License

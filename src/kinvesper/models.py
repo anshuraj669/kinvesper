@@ -30,6 +30,11 @@ class Profile(BaseModel):
     backup_name: str = ""
     backup_phone: str = ""
     backup_email: str = ""
+    # Telegram chats linked from Settings ("Connect Telegram"): alerts go there too, with answer buttons.
+    caregiver_telegram: str = ""  # chat id
+    caregiver_telegram_name: str = ""  # their Telegram name, shown in Settings
+    backup_telegram: str = ""
+    backup_telegram_name: str = ""
     pharmacy_name: str = "Main Street Pharmacy"
     emergency_number: str = "911"  # what Kinvesper tells them to call: 112 in India and the EU, 999 in the UK
     # Daily "I'm okay" check-in: the Echo asks at this time (24h HH:MM, "" = off), and the caregiver is told
@@ -103,6 +108,14 @@ class Refill(BaseModel):
     ready_by: str | None = None
     created_at: str
     updated_at: str
+
+
+class TelegramLink(BaseModel):
+    """A one-time code behind a "Connect Telegram" link (t.me/<bot>?start=<code>), valid for LINK_MINUTES."""
+
+    id: str  # the code
+    audience: Literal["caregiver", "backup"]
+    created_at: str
 
 
 class FamilyMessage(BaseModel):

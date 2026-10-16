@@ -1,0 +1,11 @@
+{
+  "name": "Kinvesper Alerts",
+  "short_description": "Care alerts about your parent from Kinvesper, their Alexa care companion.",
+  "description": "Kinvesper looks after an older parent through Alexa: medicines, check-ins, scam calls and emergencies. This bot sends the family its alerts. Tap ✅ I'm on it to mark one handled, 📋 Status for today, or type a message and Kinvesper reads it out on the Echo.\n\nTo connect, open the Kinvesper dashboard, go to Settings and press Connect Telegram.",
+  "commands": [
+    {"command": "status", "description": "Today: doses, check-in and open alerts"},
+    {"command": "ok", "description": "Mark the newest alert as handled"},
+    {"command": "help", "description": "What you can do here"},
+    {"command": "stop", "description": "Stop alerts in this chat"}
+  ]
+}

@@ -126,8 +126,10 @@ class KinvesperStack(cdk.Stack):
         # Twilio for urgent-alert phone calls: "AC...:auth token:+1..." (scripts/set_twilio.sh). Until then it's a
         # random placeholder, and Kinvesper makes no calls.
         twilio = secret("TwilioCredentials", "Twilio account SID, auth token and number for alert calls (scripts/set_twilio.sh)")
+        # Telegram alerts bot (telegram/setup.py stores the token). A random placeholder until then: no Telegram.
+        telegram = secret("TelegramBotToken", "Telegram alerts bot token (make telegram)")
         secrets = {"SERVICE_TOKEN": service_token, "SIMULATOR_KEY": simulator_key, "DASHBOARD_KEY": dashboard_key,
-                   "TWILIO_CREDENTIALS": twilio}
+                   "TWILIO_CREDENTIALS": twilio, "TELEGRAM_BOT_TOKEN": telegram}
         claude_key = None
         if llm_provider == "anthropic":
             # Starts as a placeholder (the voice agent falls back to its keyword router until the key
@@ -138,7 +140,7 @@ class KinvesperStack(cdk.Stack):
         # ---- container image, built from the repo's Dockerfile and pushed to ECR by cdk deploy
         image = ecr_assets.DockerImageAsset(
             self, "Image", directory=str(REPO_ROOT), platform=ecr_assets.Platform.LINUX_AMD64,
-            exclude=[".git", ".venv", ".idea", ".env", "data", "infra", "web", "tests", "alexa", "**/__pycache__", "cdk.out"],
+            exclude=[".git", ".venv", ".idea", ".env", "data", "infra", "web", "tests", "alexa", "telegram", "**/__pycache__", "cdk.out"],
         )
 
         # ---- IAM: App Runner pulls the image; the app gets only what it uses
@@ -274,6 +276,7 @@ class KinvesperStack(cdk.Stack):
         out("SimulatorKeySecret", simulator_key.secret_arn, "aws secretsmanager get-secret-value --secret-id <arn>")
         out("DashboardKeySecret", dashboard_key.secret_arn, "aws secretsmanager get-secret-value --secret-id <arn>")
         out("ServiceTokenSecret", service_token.secret_arn, "Bearer token that skips OAuth (simulators)")
+        out("TelegramSecret", telegram.secret_arn, "Telegram bot token for alerts: set with make telegram")
         out("TwilioSecret", twilio.secret_arn, "Twilio credentials for alert calls: set with scripts/set_twilio.sh")
         if claude_key:
             out("ClaudeApiKeySecret", claude_key.secret_arn, "Set with scripts/set_claude_key.sh")

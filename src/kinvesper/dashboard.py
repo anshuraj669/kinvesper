@@ -25,17 +25,20 @@ off without it. With OAuth off (local dev) it is open.
 from __future__ import annotations
 
 import hmac
+import logging
 from importlib.resources import files
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
-from . import notify
+from . import notify, telegram
 from .config import settings
 from .models import ScanResult
 from .scheduler import check_once
 from .service import CareService, SettingsError
+
+log = logging.getLogger(__name__)
 
 OFF = "The caregiver dashboard is off: with OAuth on it needs DASHBOARD_KEY."
 MAX_PHOTO_BYTES = 5 * 1024 * 1024  # Claude's limit for one image
@@ -133,16 +136,26 @@ def dashboard_routes(service: CareService) -> list[Route]:
         return Response(f'<Response><Say voice="{notify.VOICE}">{notify.escape(said)}</Say></Response>',
                         media_type="application/xml")
 
-    async def whatsapp_incoming(request: Request) -> Response:
-        """A WhatsApp message to the Twilio number (the sandbox's "When a message comes in" webhook).
-        Twilio's signature stands in for the dashboard key, and only saved contacts' numbers count."""
-        form = {k: str(v) for k, v in (await request.form()).items()}
-        url = f"{settings.public_url.rstrip('/')}{request.url.path}"
-        if not notify.twilio_signature_ok(url, form, request.headers.get("x-twilio-signature", "")):
+    async def telegram_webhook(request: Request) -> Response:
+        """Updates from the Kinvesper bot. Telegram's secret header stands in for the dashboard key."""
+        if not telegram.secret_ok(request.headers.get("x-telegram-bot-api-secret-token", "")):
             return Response(status_code=403)
-        phone = form.get("From", "").removeprefix("whatsapp:")
-        answer = await service.whatsapp_reply(phone, form.get("Body", ""))
-        return Response(notify.message_twiml(answer), media_type="application/xml")
+        try:
+            await service.telegram_update(await json_body(request))
+        except Exception:  # answer 200 anyway, or Telegram resends the same update again and again
+            log.exception("Telegram update failed")
+        return Response(status_code=200)
+
+    async def telegram_link(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        body = await json_body(request)
+        try:
+            if request.url.path.endswith("/unlink"):
+                return JSONResponse(await service.telegram_unlink(str(body.get("audience") or "caregiver")))
+            return JSONResponse(await service.telegram_link(str(body.get("audience") or "caregiver")))
+        except SettingsError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
     async def check_interactions(request: Request) -> Response:
         if denied := guard(request):
@@ -223,5 +236,7 @@ def dashboard_routes(service: CareService) -> list[Route]:
         Route("/api/medications/scan", scan, methods=["POST"]),
         Route("/api/medications/interactions", check_interactions, methods=["POST"]),
         Route("/api/calls/{alert_id}/ack", call_ack, methods=["POST"]),
-        Route("/api/whatsapp/incoming", whatsapp_incoming, methods=["POST"]),
+        Route("/api/telegram/webhook", telegram_webhook, methods=["POST"]),
+        Route("/api/telegram/link", telegram_link, methods=["POST"]),
+        Route("/api/telegram/unlink", telegram_link, methods=["POST"]),
     ]

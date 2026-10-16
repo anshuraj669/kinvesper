@@ -49,7 +49,7 @@ def test_cloud_configuration(template):
 
 def test_secrets_never_plaintext(template):
     secrets = _env(template, "RuntimeEnvironmentSecrets")
-    assert set(secrets) == {"SERVICE_TOKEN", "SIMULATOR_KEY", "DASHBOARD_KEY", "TWILIO_CREDENTIALS"}
+    assert set(secrets) == {"SERVICE_TOKEN", "SIMULATOR_KEY", "DASHBOARD_KEY", "TWILIO_CREDENTIALS", "TELEGRAM_BOT_TOKEN"}
     assert all("Ref" in v for v in secrets.values())  # secret ARNs, resolved by App Runner
     assert "SERVICE_TOKEN" not in _env(template)
 

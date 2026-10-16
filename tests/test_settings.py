@@ -108,7 +108,7 @@ async def test_medicines_are_edited_and_retired(service):
 @pytest.mark.parametrize("profile, meds, error", [
     ({"caregiver_phone": "5550102030"}, None, "country code"),
     ({"caregiver_email": "not-an-email"}, None, "email"),
-    ({"caregiver_phone": "", "caregiver_email": ""}, None, "phone number or an email"),
+    ({"caregiver_phone": "", "caregiver_email": ""}, None, "phone number, an email or Telegram"),
     ({"caregiver_name": " "}, None, "Caregiver name is required"),
     ({}, [{"name": "X", "dose": "1 mg", "times": ["25:00"]}], "HH:MM"),
     ({}, [{"name": "X", "dose": "", "times": ["08:00"]}], "dose"),
