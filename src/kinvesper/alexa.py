@@ -23,6 +23,7 @@ import logging
 import posixpath
 import time
 from datetime import UTC, datetime
+from html import escape
 from urllib.parse import urlsplit
 
 import certifi
@@ -36,11 +37,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from . import apl, llm
+from . import apl, llm, media
 from .config import settings
 from .i18n import lang, t
 from .reminders import SCOPE, TIMER_SCOPE, EchoReminders, spoken_times
-from .service import CareService, heard_messages
+from .service import CareService, heard_messages, heard_one
 from .voice import VoiceSession, VoiceSessions
 
 log = logging.getLogger(__name__)
@@ -146,7 +147,9 @@ def ask_reminders_permission(purpose: str = "pills") -> dict:
 
 
 def speak(text: str, *, end: bool, reprompt: str | None = REPROMPT) -> dict:
-    response: dict = {"outputSpeech": {"type": "PlainText", "text": text}, "shouldEndSession": end}
+    """Alexa's reply. Text that starts with <speak> is SSML (a family voice note is an <audio> in it)."""
+    said = {"type": "SSML", "ssml": text} if text.startswith("<speak>") else {"type": "PlainText", "text": text}
+    response: dict = {"outputSpeech": said, "shouldEndSession": end}
     if not end and reprompt:
         response["reprompt"] = {"outputSpeech": {"type": "PlainText", "text": reprompt}}
     return {"version": "1.0", "response": response}
@@ -163,6 +166,7 @@ class AlexaBridge:
         self._by_alexa: dict[str, str] = {}
         # Answers that missed Alexa's deadline, spoken on the person's next turn.
         self._late: dict[str, asyncio.Future] = {}
+        self._photos: dict[str, tuple[str, str]] = {}  # a family photo to show with this reply: (url, caption)
 
     async def _session(self, alexa_id: str) -> VoiceSession:
         if (sid := self._by_alexa.get(alexa_id)) and (session := self.sessions.get(sid)):
@@ -179,11 +183,13 @@ class AlexaBridge:
     async def handle(self, body: dict) -> dict:
         reply = await self._handle(body)
         response = reply.get("response")
+        photo = self._photos.pop((body.get("session") or {}).get("sessionId", ""), None)
         if (response is not None and self.service and apl.supports_screen(body)
                 and not any(d.get("type") == "Connections.SendRequest" for d in response.get("directives", []))):
             try:
                 said = (response.get("outputSpeech") or {}).get("text", "")
                 response.setdefault("directives", []).append(
+                    apl.photo(*photo) if photo else
                     apl.screen(self.service.schedule(), self.service.profile().preferred_name, said if len(said) < 140 else ""))
             except Exception:
                 log.exception("Couldn't draw the Echo Show screen")
@@ -235,6 +241,13 @@ class AlexaBridge:
                 said, note = heard_messages(news, locale, session.patient)
                 session.notes.append(f"They just heard these family messages: {said} {note}".strip())
                 welcome = f"{said} {t(locale, 'reprompt')}"
+                if any(m.media == "voice" for m in news):  # play the family's own voice
+                    welcome = "<speak>" + " ".join(
+                        escape(heard_one(m, locale, session.patient))
+                        + (f' <audio src="{escape(media.url(m.id, absolute=True))}"/>' if m.media == "voice" else "")
+                        for m in news) + f" {escape(t(locale, 'reprompt'))}</speak>"
+                if photo := next((m for m in news if m.media == "photo"), None):
+                    self._photos[alexa_id] = (media.url(photo.id, absolute=True), f"From {photo.sender}")
             return speak(welcome, end=False, reprompt=t(locale, "reprompt"))
         if kind != "IntentRequest":
             return say("cant_do")

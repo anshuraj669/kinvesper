@@ -81,3 +81,21 @@ def screen(schedule: ScheduleResult, name: str, said: str = "") -> dict:
             "items": items,
         }},
     }
+
+
+def photo(url: str, caption: str) -> dict:
+    """A family photo, full screen, with who sent it."""
+    return {
+        "type": "Alexa.Presentation.APL.RenderDocument", "token": "kinvesper-photo",
+        "document": {"type": "APL", "version": "2023.3", "theme": "dark", "mainTemplate": {"parameters": ["payload"], "items": [{
+            "type": "Container", "width": "100vw", "height": "100vh", "items": [
+                {"type": "Image", "source": "${payload.photo.url}", "width": "100vw", "height": "100vh",
+                 "scale": "best-fit", "position": "absolute", "accessibilityLabel": "${payload.photo.caption}"},
+                {"type": "Frame", "position": "absolute", "bottom": 0, "width": "100vw",
+                 "background": {"type": "LinearGradient", "colorRange": ["#00000000", "#000000cc"], "angle": 180},
+                 "item": {"type": "Text", "text": "${payload.photo.caption}", "fontSize": "@fontSizeLarge", "fontWeight": "bold",
+                          "color": "#ffffff", "paddingLeft": "@marginHorizontal", "paddingTop": "@spacingLarge",
+                          "paddingBottom": "@spacingMedium"}},
+            ]}]}},
+        "datasources": {"photo": {"url": url, "caption": caption}},
+    }

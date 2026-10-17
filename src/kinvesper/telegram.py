@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import re
 from html import escape
@@ -113,3 +114,38 @@ def alert_html(level: str, title: str, detail: str, about: str) -> str:
 
 def name_of(user: dict) -> str:
     return " ".join(x for x in (user.get("first_name"), user.get("last_name")) if x) or user.get("username") or "you"
+
+
+async def download(file_id: str) -> bytes | None:
+    """A file someone sent the bot (a voice note, a photo), by its file_id."""
+    info = await call("getFile", file_id=file_id)
+    if not info or not info.get("file_path"):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=20, transport=_transport) as http:
+            r = await http.get(f"{API}/file/bot{settings.telegram_bot_token}/{info['file_path']}")
+        r.raise_for_status()
+        return r.content
+    except httpx.HTTPError as e:
+        log.warning("Telegram download failed: %s", type(e).__name__)
+        return None
+
+
+async def send_voice(chat_id: str, ogg: bytes, caption: str = "", reply_to: int | None = None) -> bool:
+    """A voice note (OGG/Opus) to a linked chat."""
+    if not (enabled() and chat_id):
+        return False
+    data = {"chat_id": chat_id, "caption": caption[:1000], "parse_mode": "HTML"}
+    if reply_to:
+        data["reply_parameters"] = json.dumps({"message_id": reply_to, "allow_sending_without_reply": True})
+    try:
+        async with httpx.AsyncClient(timeout=30, transport=_transport) as http:
+            r = await http.post(f"{API}/bot{settings.telegram_bot_token}/sendVoice", data=data,
+                                files={"voice": ("answer.ogg", ogg, "audio/ogg")})
+        ok = r.json().get("ok", False)
+        if not ok:
+            log.warning("Telegram sendVoice failed: %s", r.json().get("description", r.status_code))
+        return bool(ok)
+    except (httpx.HTTPError, ValueError) as e:
+        log.warning("Telegram sendVoice failed: %s", type(e).__name__)
+        return False

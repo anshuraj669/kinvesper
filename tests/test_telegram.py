@@ -260,3 +260,19 @@ def test_messaging_the_asker_right_after_the_question_answers_it(service, bot):
     service.take_family_messages()
     assert service.family_question(within=ANSWER_NOW, sender="Priya")
     assert not service.family_question(within=ANSWER_NOW, sender="Ravi")
+
+
+def test_each_answer_goes_to_its_own_question(service, bot):
+    _, post = webhook(service)
+    link(service, post)
+    first, second = message("Did you take your medicine?"), message("Did you like the photo?")
+    first["message"]["message_id"], second["message"]["message_id"] = 11, 12
+    post(first)
+    post(second)
+    heard = service.take_family_messages().messages
+    medicine = next(m for m in heard if "medicine" in m.text)
+    assert "question_id" in heard_messages(heard, "en-US", "Margaret")[1]
+    asyncio.run(service.answer_family_question("Yes, after dinner", question_id=medicine.id))
+    assert sent(bot)[-1]["reply_parameters"]["message_id"] == 11
+    asyncio.run(service.answer_family_question("It was lovely"))  # no id: the one still waiting
+    assert sent(bot)[-1]["reply_parameters"]["message_id"] == 12

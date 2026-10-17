@@ -91,6 +91,7 @@ class Alert(BaseModel):
     dedupe_key: str | None = None
     notified: bool = False
     acknowledged: bool = False
+    acknowledged_at: str | None = None
     escalated_at: str | None = None  # when it went to the backup contact, unacknowledged
     called_at: str | None = None  # when the caregiver's phone was rung about it (urgent alerts)
 
@@ -133,6 +134,11 @@ class FamilyMessage(BaseModel):
     telegram_message_id: int | None = None
     answer: str = ""
     answered_at: str | None = None
+    answer_voice: bool = False  # their recorded answer went back too, as a voice note
+    # A voice note or photo sent from Telegram: the file stays there (media.py fetches it to play or show).
+    media: Literal["", "voice", "photo"] = ""
+    file_id: str = ""
+    duration: int = 0  # seconds, for a voice note
 
 
 class Memory(BaseModel):
@@ -230,6 +236,13 @@ class Reminder(BaseModel):
 class ReminderResult(BaseModel):
     reminder: Reminder | None = None
     reminders: list[Reminder] = Field(default_factory=list)
+    message: str
+
+
+class SafeWordResult(BaseModel):
+    set: bool = Field(description="Whether the family has chosen a safe word")
+    matches: bool | None = Field(default=None, description="Whether the caller said it; None when there's nothing to check")
+    family_alerted: bool = False
     message: str
 
 

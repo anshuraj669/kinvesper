@@ -11,6 +11,8 @@ and there's no message template or 24-hour window as there is with WhatsApp.
 | Tap **📋 Status** (or send `/status`) | Today's doses taken and missed, the last check-in mood, and open alerts |
 | Type anything else | It's saved as a family message and read out on the Echo the next time she talks to Alexa |
 | Ask her something ("Ask her if she took her pills") | The Echo asks her ("Did you take your pills today?"), and her spoken answer comes back here as a reply to your question |
+| Send a voice note | The Echo plays it in your own voice. A spoken question is answered back too |
+| Send a photo (a caption is optional) | It fills her Echo Show, and Claude describes it aloud for her |
 | `/help`, `/stop` | What the bot can do; stop alerts in this chat |
 
 The backup contact can connect too. They get the urgent alerts nobody answered in time, and the

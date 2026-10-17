@@ -11,7 +11,9 @@ and keeps the family caregiver informed.
   "remind me to call Priya at 5" sets a one-off reminder; "set an alarm for my doctor's appointment"
   sets an important alarm (a heads-up 30 minutes before, ringing until stopped, and the family told).
 - **Scam shield:** red-flag checks plus the family's trusted numbers, to catch callers pretending to
-  be the bank, the doctor or a grandchild.
+  be the bank, the doctor or a grandchild, and a **family safe word**: a caller who says they're family
+  is asked for it, and Kinvesper checks the answer without ever saying the word (voice cloning can't
+  fake a secret).
 - **Family in the loop:** alerts by text and email, a phone call for anything urgent, a backup contact
   when nobody answers, a daily "I'm okay" check-in, a weekly report, and messages typed in the
   dashboard that the Echo reads out.
@@ -22,6 +24,14 @@ and keeps the family caregiver informed.
   data, and a printable doctor-visit summary has adherence, symptoms and questions to ask.
 - **Company:** "let's chat" starts a conversation about their life; the memories they share are
   kept for the family.
+- **Voices and photos from the family:** a voice note sent to the Kinvesper Telegram bot plays on the
+  Echo in the family's own voice, and a photo fills the Echo Show (and is described aloud). When they
+  ask her something, her spoken answer goes back to the chat, as text and as her own voice.
+- **Early warning:** wellbeing trends put this week next to the four before it (doses, mood, repeated
+  questions, how much she talks to Kinvesper) and tell the family when several change together:
+  "worth a visit". An observation, not a diagnosis.
+- **Proof it helps:** the dashboard counts what Kinvesper did in the last 30 days: suspicious calls
+  caught, doses taken, conversations, family messages heard and how fast urgent alerts were answered.
 
 ## Architecture
 
@@ -194,6 +204,9 @@ Settings also holds:
   and times ("BD" becomes 8 AM and 8 PM, "as needed" medicines are set aside) for the caregiver to
   check before saving. New medicines are checked for interactions with the rest.
 - **A daily "I'm okay" check-in** time: the Echo asks, and silence tells the family.
+- **A family safe word**, kept apart from the rest of the household data: it never reaches the voice
+  model, the MCP resources or the Echo. `check_safe_word` only answers yes or no, and a wrong word
+  is an urgent scam alert.
 
 **Phone calls for urgent alerts** go through Twilio (a free trial is enough: it calls the numbers
 verified in the Twilio console). Put `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_FROM` in
@@ -213,9 +226,21 @@ caregiver presses Start, every alert arrives in that chat:
 | **📋 Status** (or `/status`) | Today's doses taken and missed, the last check-in mood, open alerts |
 | anything else | Saved as a family message and read out on the Echo next time |
 | a question ("ask her if she ate") | The Echo asks her, and her spoken answer comes back to the chat as a reply |
+| a voice note | Played on the Echo in your own voice (transcribed, so a spoken question is answered back too) |
+| a photo, with or without a caption | Shown on the Echo Show and described aloud by Claude |
+
+Her answers in the voice simulator also come back as a voice note in her own voice. Voice notes and
+photos stay in Telegram: the server keeps only the file id and fetches them through signed
+`/media/<id>` links (Alexa fetches audio and images without our headers), converting voice notes to
+the MP3 Alexa plays.
 
 The backup contact can connect too, for escalations. The weekly report goes to the caregiver's
 chat. Only linked chats count, and the webhook checks Telegram's secret header.
+
+The dashboard opens with **Kinvesper for Margaret, last 30 days** (the impact numbers) and has a
+**Wellbeing trends** card: four small charts of the last five weeks, the changes that stand out, and
+a level (steady, keep an eye on it, worth a visit). When several signals change together the family
+gets one alert that week, and the weekly report includes the trend.
 
 The dashboard also has **Ask Kinvesper** (Claude answers questions about the last two weeks from the
 care data, and says so when it doesn't track something), **Send a message** (read out on the Echo
@@ -363,6 +388,8 @@ Details and the AWS services per phase are in [PHASES.md](PHASES.md).
 - [x] **Phase 7:** medicine interaction checks (FDA labels), prescription photos, Ask Kinvesper,
   daily check-in, phone calls for urgent alerts, repeated-question notes, doctor visit summary,
   family messages, companionship and memories, Echo Show screen, Telegram alerts bot
+- [x] **Phase 8:** voice notes and photos from Telegram on the Echo, her answers back in her own
+  voice, wellbeing trends, the family safe word, impact numbers
 - [ ] **Next:** multi-family accounts, Alexa+ add-on (waiting on the allowlist)
 
 ## License

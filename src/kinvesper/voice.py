@@ -102,6 +102,9 @@ class Announcement(BaseModel):
     text: str
     tool_calls: list[ToolCall] = []
     ring: Literal["", "reminder", "alarm", "message"] = ""  # a reminder going off or a family message: the page says it aloud
+    audio_url: str = ""  # a family voice note, played after `text`
+    image_url: str = ""  # a family photo, shown with it
+    sender: str = ""  # who a family message is from
 
 
 def spoken_clock() -> str:
@@ -258,6 +261,7 @@ class VoiceSession:
         self.notes: list[str] = []  # background updates for the model, sent with the next user turn
         self.announcements: list[Announcement] = []
         self.rung: set[str] = set()  # reminders this page has already rung
+        self.recording: tuple[str, bytes] | None = None  # the last spoken request (its text and audio)
         self._calls: list[ToolCall] = []
         self._pending: _Pending | None = None
         self._pending_event = asyncio.Event()

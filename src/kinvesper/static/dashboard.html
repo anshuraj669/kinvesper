@@ -248,6 +248,38 @@
   .qa .a { margin-top: 3px; padding: 12px 14px; border-radius: 18px; border-top-left-radius: 6px; background: var(--glass-strong);
     box-shadow: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px var(--well-edge) inset; white-space: pre-line; }
   .qa .a.thinking { color: var(--muted); }
+  /* ---- impact & wellbeing trends ---- */
+  .impact { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 4px; }
+  .impact .stat { padding: 14px 14px 12px; border-radius: 18px; background: var(--well); box-shadow: 0 0 0 1px var(--well-edge) inset; }
+  .impact .num { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; color: var(--ink); }
+  .impact .what { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+  .impact .more { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .impact .stat.hl .num { color: var(--brand); }
+  .trend-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+  .level { flex: none; font-size: 13px; font-weight: 600; padding: 5px 11px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); }
+  .level.watch { background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning-ink); }
+  .level.visit { background: color-mix(in srgb, var(--critical) 16%, transparent); color: var(--critical); }
+  .signals { margin: 0 0 14px; padding-left: 18px; }
+  .signals li { margin: 3px 0; }
+  .sparks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .spark { padding: 12px 14px; border-radius: 18px; background: var(--well); }
+  .spark.flag { box-shadow: 0 0 0 1.5px var(--warning) inset; }
+  .spark .name { font-size: 13px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 6px; }
+  .spark .name b { color: var(--ink); }
+  .spark .bars { display: flex; align-items: flex-end; gap: 6px; height: 56px; margin-top: 10px; }
+  .spark .bars span { flex: 1; border-radius: 6px 6px 3px 3px; background: color-mix(in srgb, var(--brand) 35%, transparent); min-height: 3px; }
+  .spark .bars span.now { background: var(--brand); }
+  .spark.flag .bars span.now { background: var(--warning); }
+  .spark .weeks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .note-line { font-size: 12px; color: var(--muted); margin-top: 12px; }
+  .msg-photo { display: block; max-width: 100%; max-height: 160px; border-radius: 12px; margin-top: 6px; object-fit: cover; }
+  .answer { margin-top: 6px; padding: 8px 10px; border-radius: 12px; background: var(--brand-soft); font-size: 14px; }
+  @media (max-width: 900px) {
+    .impact { grid-template-columns: repeat(2, 1fr); }
+    .sparks { grid-template-columns: repeat(2, 1fr); }
+    .impact .num { font-size: 26px; }
+  }
+
   /* ---- family messages & memories ---- */
   .compose { display: grid; gap: 8px; }
   .compose textarea { font: inherit; resize: vertical; min-height: 70px; padding: 10px 12px; border: none; border-radius: 14px; color: var(--ink);
@@ -663,6 +695,7 @@
       tile("Doses today", `${taken} of ${today.length}`, missed ? `${missed} missed` : "None missed"),
       tile("Open alerts", String(openAlerts.length), urgent ? `${urgent} urgent` : "None urgent"),
       tile("Last active", ago(p.last_activity), p.last_activity ? new Date(p.last_activity).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : "", "last"),
+      impactCard(d),
       askCard(d),
       alertsCard,
       todayCard,
@@ -675,6 +708,7 @@
         moodChart(d.checkins),
         tableView("mood", [["When"], ["Mood"], ["Notes"]],
           d.checkins.map((c) => [day(c.at, { weekday: "short", month: "short", day: "numeric" }), c.mood, c.notes || "—"]))),
+      trendsCard(d),
       reportCard,
       card("span-5", "Reminders and alarms", "Set by voice. Alarms ring on the Echo.", reminders),
       messagesCard(d),
@@ -751,12 +785,62 @@
     } }, box, h("div", { class: "row" }, count, send));
     const sent = d.family_messages.length
       ? h("ul", { class: "rows", style: "margin-top:14px" }, d.family_messages.map((m) => h("li", {}, h("div", { class: "main" },
-          h("div", { class: "detail", style: "color:var(--ink)" }, m.text),
+          h("div", { class: "detail", style: "color:var(--ink)" }, m.media === "voice" ? `🎙 Voice message${m.duration ? ` (${m.duration}s)` : ""} from ${m.sender}: ` : m.media === "photo" ? `📷 Photo from ${m.sender}: ` : "", m.text),
+          m.media === "photo" && m.media_url ? h("img", { class: "msg-photo", src: m.media_url, alt: m.text, loading: "lazy" }) : null,
+          m.media === "voice" && m.media_url ? h("audio", { controls: "", preload: "none", src: m.media_url, style: "margin-top:6px;max-width:100%;height:34px" }) : null,
+          m.answer ? h("div", { class: "answer" }, h("strong", {}, `${p.preferred_name} answered: `), m.answer, m.answer_voice ? " 🎙" : "") : null,
           h("div", { class: "meta" }, status(m.heard_at ? "taken" : "upcoming"),
             m.heard_at ? ` · ${p.preferred_name} heard it ${ago(m.heard_at)}` : ` · plays next time ${p.preferred_name} uses Alexa`, ` · sent ${ago(m.created_at)}`)))))
       : null;
     if (sent) sent.querySelectorAll(".status").forEach((s, i) => (s.lastChild.textContent = d.family_messages[i].heard_at ? "Heard" : "Waiting"));
     return card("span-5", `Send ${p.preferred_name} a message`, "Kinvesper reads it out on the Echo the next time it's used.", form, sent);
+  }
+
+  // ---- what Kinvesper did this month, in numbers
+  function impactCard(d) {
+    const m = d.impact, p = d.profile;
+    if (!m) return null;
+    const stat = (num, what, more, hl) => h("div", { class: `stat${hl ? " hl" : ""}` },
+      h("div", { class: "num" }, num), h("div", { class: "what" }, what), more ? h("div", { class: "more" }, more) : null);
+    return card("span-12", `Kinvesper for ${p.preferred_name}, last ${m.days} days`, "What it did for the family, from the care data",
+      h("div", { class: "impact" },
+        stat(String(m.scams_caught), m.scams_caught === 1 ? "suspicious call caught" : "suspicious calls caught", "the family was told each time", m.scams_caught > 0),
+        stat(m.adherence === null ? "—" : `${m.adherence}%`, "of doses taken", `${m.doses_taken} of ${m.doses_scheduled}, ${m.on_time} within the hour`),
+        stat(String(m.conversations), "conversations with Kinvesper", "by voice, on the Echo"),
+        stat(String(m.family_messages), "family messages heard", m.questions_answered ? `${m.questions_answered} questions answered back` : "read or played on the Echo"),
+        stat(m.response_min === null ? "—" : `${m.response_min} min`, "typical response to an urgent alert", m.urgent_alerts ? `${m.urgent_alerts} urgent alert${m.urgent_alerts === 1 ? "" : "s"}` : "no urgent alerts"),
+        stat(String(m.memories), "memories saved", `${m.refills} refill${m.refills === 1 ? "" : "s"} ordered`)));
+  }
+
+  // ---- wellbeing trends: this week next to the four before
+  function trendsCard(d) {
+    const t = d.trends, p = d.profile;
+    if (!t) return null;
+    const flagged = new Set(t.signals.map((s) => s.key));
+    const LABEL = { steady: "Steady", watch: "Keep an eye on it", visit: "Worth a visit" };
+    const metric = (key, name, fmt, max) => {
+      const vals = t.weeks.map((w) => w[key]);
+      const top = max ?? Math.max(1, ...vals.filter((v) => v !== null));
+      const last = vals[vals.length - 1];
+      return h("div", { class: `spark${flagged.has(key) ? " flag" : ""}`, role: "img",
+          "aria-label": `${name}: ${vals.map((v) => (v === null ? "no data" : fmt(v))).join(", ")}, oldest week first` },
+        h("div", { class: "name" }, name, h("b", {}, last === null ? "—" : fmt(last))),
+        h("div", { class: "bars" }, vals.map((v, i) => h("span", { class: i === vals.length - 1 ? "now" : "",
+          style: `height:${v === null ? 0 : Math.max(4, (100 * v) / top)}%`, title: `${day(t.weeks[i].start, { month: "short", day: "numeric" })}: ${v === null ? "no data" : fmt(v)}` }))),
+        h("div", { class: "weeks" }, h("span", {}, `${t.weeks.length - 1} wk ago`), h("span", {}, "this week")));
+    };
+    return card("span-12", "Wellbeing trends", `This week next to the four before it, so slow changes in ${p.preferred_name}'s routine stand out`,
+      h("div", { class: "trend-head" }, h("span", { class: `level ${t.level}` }, LABEL[t.level]), h("div", {}, t.summary)),
+      t.signals.length ? h("ul", { class: "signals" }, t.signals.map((s) => h("li", {}, s.text))) : null,
+      h("div", { class: "sparks" },
+        metric("adherence", "Doses taken", (v) => `${v}%`, 100),
+        metric("mood", "Mood at check-in", (v) => `${v} / 5`, 5),
+        metric("repeats", "Repeated questions", (v) => String(v)),
+        metric("talks", "Conversations", (v) => String(v))),
+      tableView("trends", [["Week of"], ["Doses", 1], ["Mood", 1], ["Repeats", 1], ["Talks", 1]],
+        t.weeks.map((w) => [day(w.start, { month: "short", day: "numeric" }), w.adherence === null ? "—" : `${w.adherence}%`,
+          w.mood === null ? "—" : String(w.mood), String(w.repeats), String(w.talks)])),
+      h("p", { class: "note-line" }, `${t.note} Mood is scored 1 (unwell) to 5 (great).`));
   }
 
   function memoriesCard(d) {

@@ -3,17 +3,31 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import difflib
 import json
+import logging
 import re
 import secrets
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from html import escape
 
 import anyio
 
-from . import contacts, i18n, interactions, llm, notify, scam, telegram, when
+from . import (
+    contacts,
+    i18n,
+    interactions,
+    llm,
+    media,
+    notify,
+    scam,
+    speech,
+    telegram,
+    when,
+)
 from .config import now, settings
 from .models import (
     Alert,
@@ -39,6 +53,7 @@ from .models import (
     RefillResult,
     Reminder,
     ReminderResult,
+    SafeWordResult,
     ScamAssessment,
     ScannedMedicine,
     ScanResult,
@@ -178,6 +193,19 @@ mention what it does track. Never diagnose; for health worries suggest talking t
 markdown. Say dates as weekdays ("on Tuesday") when they're within the week."""
 
 
+log = logging.getLogger(__name__)
+MAX_VOICE_S = 180
+MOOD_SCORE = {"great": 5, "good": 4, "okay": 3, "low": 2, "unwell": 1}
+# Someone claiming to be family or a friend on the phone: the moment to ask for the family's safe word.
+CLAIMS_FAMILY = re.compile(r"grand(son|daughter|child|kid|ma|pa)|\b(son|daughter|nephew|niece|brother|sister|cousin|"
+                           r"uncle|aunt|relative|family|friend|beta|beti|it'?s me)\b", re.IGNORECASE)
+PHOTO_SYSTEM = """You describe a photo a family member sent to {name}, an older adult whose Echo will say it aloud (their
+eyesight may be poor). One or two short, warm sentences about who and what is in it, e.g. "It's Priya and
+the two children on a beach, all smiling." Don't guess names you can't know; say "a little boy" instead.
+Plain text."""
+TRENDS_CACHE_S = 120
+
+
 class SettingsError(ValueError):
     """A settings form value that can't be saved; the message is shown to the caregiver."""
 
@@ -198,6 +226,10 @@ class CareService:
         p = self.profile()
         p.last_activity = now().isoformat()
         self.store.save("profile", p, id="main")
+        date = p.last_activity[:10]  # per-day count: how much they talk to Kinvesper is a wellbeing signal
+        day = self.store.get("activity", date) or {"date": date, "count": 0}
+        day["count"] += 1
+        self.store.put("activity", date, day)
 
     # ---------- medications ----------
 
@@ -344,6 +376,7 @@ class CareService:
                          "caregiver": p.caregiver_telegram_name if p.caregiver_telegram else "",
                          "backup": p.backup_telegram_name if p.backup_telegram else ""},
             "scan": llm.enabled(),
+            "safe_word": self.safe_word(),  # the caregiver set it; only this guarded page shows it
         }
 
     async def update_settings(self, profile: dict, medications: list[dict], trusted: list[dict] | None = None) -> dict:
@@ -654,6 +687,8 @@ class CareService:
     def acknowledge(self, alert_id: str) -> Alert | None:
         alert = self.store.load("alert", alert_id, Alert)
         if alert:
+            if not alert.acknowledged:
+                alert.acknowledged_at = now().isoformat()
             alert.acknowledged = True
             self.store.save("alert", alert)
         return alert
@@ -716,6 +751,11 @@ class CareService:
                 result.advice += f" If you're not sure, hang up and call {who.name} on the number you trust: {number}."
         elif verdict == "unknown" and result.risk != "low":
             result.advice += " That number isn't one of your trusted contacts."
+        gave_word = re.search(r"safe ?word|code ?word|secret word|password", description, re.IGNORECASE)
+        if self.safe_word() and not gave_word and (CLAIMS_FAMILY.search(description) or verdict in ("claims", "impersonation")):
+            result.advice += (" Ask them for your family's safe word. Don't say it first or give a hint. If they "
+                              "can't tell you, hang up: it isn't really them.")
+            result.red_flags.append("Claims to be family or a friend: ask for the family safe word")
         if result.risk in ("medium", "high"):  # anything suspicious reaches the caregiver
             p = self.profile()
             high = result.risk == "high"
@@ -727,6 +767,50 @@ class CareService:
             result.family_alerted = True
             result.advice += f" I've also let {p.caregiver_name} know so they can check in with you."
         return result
+
+    # ---------- family safe word ----------
+
+    def safe_word(self) -> str:
+        """The family's secret word for checking that a caller really is family. Kept out of the profile,
+        so it never reaches the voice model, the MCP resources or the Echo."""
+        return str((self.store.get("secret", "safe_word") or {}).get("word") or "")
+
+    @staticmethod
+    def check_safe_word_setting(word: str) -> str:
+        word = " ".join(word.split())
+        if word and not (3 <= len(word) <= 40):
+            raise SettingsError("The safe word should be 3 to 40 letters, an easy word for the family to remember.")
+        return word
+
+    def set_safe_word(self, word: str) -> None:
+        if word := self.check_safe_word_setting(word):
+            self.store.put("secret", "safe_word", {"word": word, "set_at": now().isoformat()})
+        else:
+            self.store.delete("secret", "safe_word")
+
+    async def check_safe_word(self, heard: str) -> SafeWordResult:
+        """Whether a caller said the family's safe word. Never says the word itself."""
+        word, p = self.safe_word(), self.profile()
+        if not word:
+            return SafeWordResult(set=False, message=(
+                f"Your family hasn't chosen a safe word yet. Hang up and call {p.caregiver_name} on the number you "
+                "already have. If they're really in trouble, they'll understand."))
+        said = re.sub(r"[^\w\s]", "", heard.lower()).split()
+        target = re.sub(r"[^\w\s]", "", word.lower()).split()
+        joined, want = " ".join(said), " ".join(target)
+        if not said:
+            return SafeWordResult(set=True, message="What word did the caller say?")
+        close = difflib.SequenceMatcher(None, joined, want).ratio() >= 0.85 or (
+            len(want) >= 4 and want in joined and len(joined) <= len(want) + 12)
+        if close:
+            return SafeWordResult(set=True, matches=True, message=(
+                "Yes, that's your family's safe word. Even so, if they ask for money, check with "
+                f"{p.caregiver_name} before sending anything."))
+        await self.raise_alert("urgent", "scam", f"Caller failed the safe-word check with {p.preferred_name}",
+                               f"Someone claiming to be family or a friend gave the wrong safe word (“{heard[:80]}”).")
+        return SafeWordResult(set=True, matches=False, family_alerted=True, message=(
+            f"No, that's not your family's word. Please hang up now: it's very likely a scam. Don't send money or share "
+            f"any details. I've let {p.caregiver_name} know."))
 
     # ---------- wellbeing ----------
 
@@ -815,6 +899,8 @@ class CareService:
         await self._call_unanswered(current)
         await self._escalate(current)
         await self._due_reminders(current)
+        if trend := await self.check_trends():
+            raised.append(trend)
         week = current.isocalendar()
         if (DAYS[current.weekday()] == settings.report_day and current.strftime("%H:%M") >= settings.report_time
                 and f"report:{week.year}-W{week.week}" not in seen):
@@ -875,6 +961,7 @@ class CareService:
         """Email the caregiver this week's report (adherence, missed doses, moods, suspicious calls)."""
         current, p = now(), self.profile()
         s = await self.summary(7)
+        trends = self.wellbeing_trends()
         week = current.isocalendar()
         start = (current - timedelta(days=6)).strftime("%b %-d")
         scams = sum(a.kind == "scam" for a in self.alerts() if a.created_at >= (current - timedelta(days=7)).isoformat())
@@ -886,7 +973,8 @@ class CareService:
             f"- Missed doses: {len(s.missed)}{chr(10) + missed if s.missed else ''}\n"
             f"- Moods at check-in: {', '.join(s.recent_moods) or 'no check-ins'}\n"
             f"- Suspicious calls or messages: {scams}\n"
-            f"- Alerts still open: {s.open_alerts}\n\n"
+            f"- Alerts still open: {s.open_alerts}\n"
+            f"- Wellbeing trend: {trends['summary']}{''.join(chr(10) + '  - ' + x['text'] for x in trends['signals'])}\n\n"
             f"Open the Kinvesper dashboard for details.\n— Kinvesper"
         )
         alert = Alert(created_at=current.isoformat(), level="info", kind="report",
@@ -959,8 +1047,12 @@ class CareService:
         if text.split("@")[0].lower() == "/stop":
             await self.telegram_unlink(who[0])
             return
+        if msg.get("voice") or msg.get("audio") or msg.get("photo"):
+            answer = await self._telegram_media(chat_id, who[1], msg)
+            await telegram.send(chat_id, answer, telegram.buttons([("📋 Status", "status")]))
+            return
         if not text:
-            await telegram.send(chat_id, "I can only pass on typed messages for now.")
+            await telegram.send(chat_id, "I can pass on typed messages, voice messages and photos.")
             return
         answer = await self.contact_reply(who[1], text, chat=chat_id, message_id=msg.get("message_id"))
         await telegram.send(chat_id, escape(answer), telegram.buttons([("📋 Status", "status")]))
@@ -1061,6 +1153,89 @@ class CareService:
             self.store.save("message", msg)
         return f"Got it. Kinvesper will read your message to {p.preferred_name} the next time they talk to Alexa."
 
+    async def _telegram_media(self, chat_id: str, who: str, msg: dict) -> str:
+        """A voice note or photo from a linked chat, for the Echo: the voice note is played as it is, a photo is
+        shown on an Echo Show and described aloud. Either one can ask her something, and the answer comes back."""
+        p, name = self.profile(), escape(self.profile().preferred_name)
+        reply_to = msg.get("message_id")
+        if voice := (msg.get("voice") or msg.get("audio")):
+            if int(voice.get("duration") or 0) > MAX_VOICE_S:
+                return "That voice message is a bit long. Please keep it under 3 minutes."
+            audio, transcript = await telegram.download(voice["file_id"]), ""
+            if audio is None:
+                return "Sorry, I couldn't fetch that voice message from Telegram. Please try again."
+            if speech.stt_available():
+                vocabulary = speech.Vocabulary(p.preferred_name, p.caregiver_name, tuple(m.name for m in self.medications()))
+                with contextlib.suppress(speech.SpeechUnavailable):
+                    transcript = await speech.transcribe(audio, vocabulary)
+            question = bool(transcript) and (await self._relay_wording(transcript, p.preferred_name))[0]
+            self.store.save("message", FamilyMessage(
+                sender=who, text=transcript or "A voice message", created_at=now().isoformat(), media="voice",
+                file_id=voice["file_id"], duration=int(voice.get("duration") or 0), question=question,
+                asked=transcript if question else "", telegram_chat=chat_id if question else "",
+                telegram_message_id=reply_to if question else None))
+            return (f"🎙 Got it. Kinvesper will play your voice message to {name} the next time they talk to Alexa"
+                    + (", and send you the answer here." if question else "."))
+        sizes = sorted(msg.get("photo") or [], key=lambda s: s.get("width", 0))
+        photo = next((s for s in reversed(sizes) if s.get("width", 0) <= 1280), sizes[-1] if sizes else None)
+        if not photo:
+            return "Sorry, I couldn't read that photo."
+        caption = " ".join((msg.get("caption") or "").split())
+        image = await telegram.download(photo["file_id"])
+        described = await self._describe_photo(image, p.preferred_name) if image else ""
+        question, say = await self._relay_wording(caption, p.preferred_name) if caption else (False, "")
+        self.store.save("message", FamilyMessage(
+            sender=who, text=" ".join(x for x in (described, say) if x) or "A photo", created_at=now().isoformat(),
+            media="photo", file_id=photo["file_id"], question=question, asked=caption,
+            telegram_chat=chat_id if question else "", telegram_message_id=reply_to if question else None))
+        return (f"📷 Got it. Kinvesper will show your photo on {name}'s Echo Show and describe it to them the next time "
+                "they talk to Alexa" + (", and send you the answer here." if question else "."))
+
+    async def _describe_photo(self, image: bytes, name: str) -> str:
+        content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                "data": base64.b64encode(image).decode()}},
+                   {"type": "text", "text": "Describe this photo for them."}]
+        out = await llm.structured(PHOTO_SYSTEM.format(name=name), content, {
+            "type": "object", "additionalProperties": False, "required": ["description"],
+            "properties": {"description": {"type": "string"}}}, max_tokens=300)
+        return " ".join(str((out or {}).get("description") or "").split())[:400]
+
+    async def family_media(self, message_id: str) -> tuple[bytes, str] | None:
+        """A family message's photo (JPEG) or voice note (as MP3), fetched from Telegram."""
+        m = self.store.load("message", message_id, FamilyMessage)
+        if not m or not m.media or not m.file_id:
+            return None
+        if hit := media.cached(m.id):
+            return hit
+        data = await telegram.download(m.file_id)
+        if data is None:
+            return None
+        try:
+            out = (data, "image/jpeg") if m.media == "photo" else (await media.to_mp3(data), "audio/mpeg")
+        except Exception:  # an undecodable file
+            log.exception("Couldn't convert the voice message")
+            return None
+        media.remember(m.id, *out)
+        return out
+
+    async def send_answer_voice(self, audio: bytes) -> bool:
+        """Their recorded answer (simulator) to a question from Telegram, as a voice note under the text answer."""
+        cutoff = (now() - timedelta(minutes=3)).isoformat()
+        m = next((m for m in self.family_messages()
+                  if m.answered_at and m.answered_at >= cutoff and m.telegram_chat and not m.answer_voice), None)
+        if m is None:
+            return False
+        try:
+            ogg = await media.to_voice_note(audio)
+        except Exception:  # an undecodable recording
+            log.exception("Couldn't convert the recorded answer")
+            return False
+        if not await telegram.send_voice(m.telegram_chat, ogg, f"🎙 {escape(self.profile().preferred_name)}, in their own voice",
+                                         reply_to=m.telegram_message_id):
+            return False
+        self.store.save("message", m.model_copy(update={"answer_voice": True}))
+        return True
+
     async def _relay_wording(self, text: str, name: str) -> tuple[bool, str]:
         """Whether a typed message asks the person something, and the words to read out to them."""
         out = await llm.structured(RELAY_SYSTEM.format(name=name), text, RELAY_SCHEMA, max_tokens=300)
@@ -1070,18 +1245,20 @@ class CareService:
         say = ASK_PREFIX.sub("", text) if re.match(r"^(please\s+)?(ask|check with)\b", text, re.IGNORECASE) else text
         return question, (say[:1].upper() + say[1:]) or text
 
-    def family_question(self, within: timedelta = ANSWER_WAIT, sender: str = "") -> FamilyMessage | None:
-        """The newest question from Telegram that the person has heard but not answered yet."""
+    def family_question(self, within: timedelta = ANSWER_WAIT, sender: str = "", question_id: str = "") -> FamilyMessage | None:
+        """The question from Telegram that the person has heard but not answered yet: the one with that id,
+        else the newest."""
         since = (now() - within).isoformat()
-        return next((m for m in self.family_messages() if m.question and m.heard_at and m.heard_at >= since
-                      and not m.answered_at and (not sender or m.sender == sender)), None)
+        waiting = [m for m in self.family_messages() if m.question and m.heard_at and m.heard_at >= since
+                   and not m.answered_at and (not sender or m.sender == sender)]
+        return next((m for m in waiting if m.id == question_id), None) or next(iter(waiting), None)
 
-    async def answer_family_question(self, answer: str) -> NotifyResult:
+    async def answer_family_question(self, answer: str, question_id: str = "") -> NotifyResult:
         """The person's answer to a question the family asked from Telegram, sent back to that chat."""
         answer = " ".join(answer.split())
         if not answer:
             return NotifyResult(sent=False, message="What would you like me to tell them?")
-        q = self.family_question()
+        q = self.family_question(question_id=question_id)
         if q is None:
             return NotifyResult(sent=False, message="There's no question from the family waiting for an answer.")
         p = self.profile()
@@ -1238,11 +1415,8 @@ class CareService:
             m.heard_at = stamp
             self.store.save("message", m)
         if len(unheard) == 1:
-            m = unheard[0]
-            if m.question:
-                return MessagesResult(messages=unheard, message=f"{m.sender} is asking: {m.text}")
-            return MessagesResult(messages=unheard, message=f"You have a message from {m.sender}: {m.text}")
-        said = " Next: ".join(f"{m.sender} asks: {m.text}" if m.question else f"from {m.sender}: {m.text}" for m in unheard)
+            return MessagesResult(messages=unheard, message=_heard_one(unheard[0]))
+        said = " Next: ".join(_heard_one(m, first=False) for m in unheard)
         return MessagesResult(messages=unheard, message=f"You have {len(unheard)} messages. First, {said}")
 
     # ---------- companionship ----------
@@ -1354,6 +1528,113 @@ class CareService:
         report["questions"] = (written or {}).get("questions") or questions or ["Is everything on the current list still needed?"]
         return report
 
+    # ---------- wellbeing trends ----------
+
+    def wellbeing_trends(self, weeks: int = 5) -> dict:
+        """This week next to the weeks before: doses, mood, repeated questions and how much they talk to
+        Kinvesper. Slow changes across these are easy to miss day to day. An observation for the family,
+        not a diagnosis. Cached for a few minutes: the dashboard asks every 15 seconds."""
+        cache = getattr(self, "_trends", None)
+        if cache and cache[0] > time.monotonic():
+            return cache[1]
+        current, p = now(), self.profile()
+        by_day = self.adherence(weeks * 7)
+        since = (current - timedelta(days=weeks * 7 - 1)).date().isoformat()
+        checkins = [c for c in self.store.load_all("checkin", CheckIn) if c.at[:10] >= since]
+        activity = {d.get("date"): d.get("count", 0) for d in self.store.list("activity") if (d.get("date") or "") >= since}
+        out = []
+        for w in range(weeks):
+            days = by_day[w * 7:(w + 1) * 7]
+            dates = [d.date for d in days]
+            scheduled, taken = sum(d.scheduled for d in days), sum(d.taken for d in days)
+            moods = [MOOD_SCORE[c.mood] for c in checkins if c.at[:10] in dates]
+            repeats = sum(sum(v for v in (self.store.get("asks", d) or {}).values() if isinstance(v, int)) for d in dates)
+            out.append({
+                "start": dates[0], "end": dates[-1],
+                "adherence": round(100 * taken / scheduled) if scheduled else None,
+                "mood": round(sum(moods) / len(moods), 1) if moods else None,
+                "low_days": sum(m <= 2 for m in moods),
+                "repeats": repeats,
+                "talks": sum(activity.get(d, 0) for d in dates),
+            })
+        this, before = out[-1], out[:-1]
+
+        def base(key: str) -> float | None:
+            vals = [w[key] for w in before if w[key] is not None]
+            return sum(vals) / len(vals) if vals else None
+
+        name, signals = p.preferred_name, []
+        if (b := base("adherence")) is not None and this["adherence"] is not None and b - this["adherence"] >= 8:
+            signals.append({"key": "adherence", "text": f"Took {this['adherence']}% of doses this week, down from about {round(b)}%."})
+        moods = [w["mood"] for w in out[-3:]]
+        if (b := base("mood")) is not None and this["mood"] is not None and (b - this["mood"] >= 0.5 or this["low_days"] >= 2):
+            falling = len(moods) == 3 and None not in moods and moods[0] > moods[1] > moods[2]
+            signals.append({"key": "mood", "text": (f"Mood at check-in has dropped {'3 weeks running' if falling else 'this week'}"
+                                                    f"{f', with {this['low_days']} low day' + 's' * (this['low_days'] != 1) if this['low_days'] else ''}.")})
+        if (b := base("repeats")) is not None and this["repeats"] >= 3 and this["repeats"] >= 2 * b + 1:
+            signals.append({"key": "repeats", "text": f"Asked the same questions {this['repeats']} times this week, usually about {round(b)}."})
+        if (b := base("talks")) is not None and b >= 5 and this["talks"] <= 0.6 * b:
+            signals.append({"key": "talks", "text": f"Talked to Kinvesper {this['talks']} times this week, usually about {round(b)}."})
+        level = "visit" if len(signals) >= 2 else "watch" if signals else "steady"
+        summary = {
+            "steady": f"Steady. Nothing has changed much for {name} compared with the last few weeks.",
+            "watch": f"One thing to keep an eye on for {name} this week.",
+            "visit": f"A few things have changed for {name} together. Worth a visit or a call, and a word with the doctor if it continues.",
+        }[level]
+        result = {"weeks": out, "signals": signals, "level": level, "summary": summary,
+                  "note": "Patterns from Kinvesper's data, not a diagnosis."}
+        self._trends = (time.monotonic() + TRENDS_CACHE_S, result)
+        return result
+
+    async def check_trends(self) -> Alert | None:
+        """Once a week, tell the family when several signals change together (a gentle, early heads-up)."""
+        trends = self.wellbeing_trends()
+        if trends["level"] != "visit":
+            return None
+        week = now().isocalendar()
+        key = f"trend:{week.year}-W{week.week}"
+        if any(a.dedupe_key == key for a in self.alerts()):
+            return None
+        p = self.profile()
+        return await self.raise_alert("warning", "pattern", f"{p.preferred_name}: worth a visit this week",
+                                      " ".join(s["text"] for s in trends["signals"]) + " " + trends["note"],
+                                      dedupe_key=key)
+
+    # ---------- impact ----------
+
+    def impact(self, days: int = 30) -> dict:
+        """What Kinvesper did for the family lately, in numbers."""
+        current = now()
+        cutoff = (current - timedelta(days=days)).isoformat()
+        alerts = [a for a in self.alerts() if a.created_at >= cutoff]
+        by_day = self.adherence(days)
+        scheduled, taken = sum(d.scheduled for d in by_day), sum(d.taken for d in by_day)
+        on_time, dates = 0, {d.date for d in by_day}
+        for d in self.store.load_all("dose", DoseLog):
+            if d.date in dates:
+                with contextlib.suppress(ValueError):
+                    on_time += abs(datetime.fromisoformat(d.taken_at) - _at(datetime.fromisoformat(d.taken_at), d.slot)) <= timedelta(hours=1)
+        on_time = min(on_time, taken)
+        urgent = [a for a in alerts if a.level == "urgent" and a.kind != "test"]
+        waits = sorted((datetime.fromisoformat(a.acknowledged_at) - datetime.fromisoformat(a.created_at)).total_seconds() / 60
+                       for a in urgent if a.acknowledged_at)
+        messages = [m for m in self.family_messages() if m.created_at >= cutoff]
+        since = cutoff[:10]
+        return {
+            "days": days,
+            "scams_caught": sum(a.kind == "scam" for a in alerts),
+            "doses_taken": taken, "doses_scheduled": scheduled,
+            "adherence": round(100 * taken / scheduled) if scheduled else None,
+            "on_time": on_time,
+            "conversations": sum(d.get("count", 0) for d in self.store.list("activity") if (d.get("date") or "") >= since),
+            "urgent_alerts": len(urgent),
+            "response_min": round(waits[len(waits) // 2]) if waits else None,
+            "family_messages": sum(bool(m.heard_at) for m in messages),
+            "questions_answered": sum(bool(m.answered_at) for m in messages),
+            "memories": sum(m.at >= cutoff for m in self.memories()),
+            "refills": sum(r.created_at >= cutoff for r in self.refills()),
+        }
+
     # ---------- dashboard ----------
 
     def checkins(self, days: int = 14) -> list[CheckIn]:
@@ -1388,9 +1669,12 @@ class CareService:
             "alerts_reach": {"phone": bool(p.caregiver_phone), "email": bool(p.caregiver_email),
                              "backup": bool(p.backup_phone or p.backup_email or p.backup_telegram),
                              "telegram": bool(p.caregiver_telegram), "calls": notify.calls_enabled() and bool(p.caregiver_phone)},
-            "family_messages": [m.model_dump() for m in self.family_messages()[:5]],
+            "family_messages": [{**m.model_dump(exclude={"file_id", "telegram_chat"}),
+                                 "media_url": media.url(m.id) if m.media else ""} for m in self.family_messages()[:5]],
             "memories": [m.model_dump() for m in self.memories()[:6]],
             "ask_enabled": llm.enabled(),
+            "trends": self.wellbeing_trends(),
+            "impact": self.impact(),
         }
 
     # ---------- summaries ----------
@@ -1466,13 +1750,31 @@ class CareService:
         return out
 
 
+def _heard_one(m: FamilyMessage, first: bool = True) -> str:
+    """One family message as a tool result says it (the voice model can't play a voice note: it reads what it says)."""
+    if m.media == "voice":
+        return f"{m.sender} sent a voice message{f'. It says: {m.text}' if m.text != 'A voice message' else ''}"
+    if m.media == "photo":
+        return f"{m.sender} sent a photo: {m.text}"
+    if m.question:
+        return f"{m.sender} is asking: {m.text}" if first else f"{m.sender} asks: {m.text}"
+    return f"You have a message from {m.sender}: {m.text}" if first else f"from {m.sender}: {m.text}"
+
+
+def heard_one(m: FamilyMessage, locale: str, name: str) -> str:
+    """What the Echo says for one family message (a voice note's own audio is played after it)."""
+    key = {"voice": "family_voice", "photo": "family_photo"}.get(m.media) or ("family_question" if m.question else "family_message")
+    return i18n.t(locale, key, name=name, sender=m.sender, text=m.text).strip()
+
+
 def heard_messages(messages: list[FamilyMessage], locale: str, name: str) -> tuple[str, str]:
     """Family messages as the Echo reads them out, and a note telling the voice model which of them
     wait for an answer (a question asked from Telegram goes back with answer_family_question)."""
-    said = " ".join(i18n.t(locale, "family_question" if m.question else "family_message", name=name, sender=m.sender, text=m.text)
-                    for m in messages)
+    said = " ".join(heard_one(m, locale, name) for m in messages)
     asked = [m for m in messages if m.question]
-    note = " ".join(f"{m.sender} asked them “{m.text}” and is waiting for the answer in Telegram. Their next words "
-                    "are most likely the answer: call answer_family_question with it, in their own words (not "
-                    "notify_caregiver, and without asking to confirm)." for m in asked)
+    note = " ".join(f"{m.sender} asked them “{m.text}” (question_id {m.id}) and is waiting for the answer in Telegram. "
+                    "Their next words are most likely the answer: call answer_family_question with it, in their own "
+                    "words, and that question_id (not notify_caregiver, and without asking to confirm)." for m in asked)
+    if len(asked) > 1:
+        note += " Answer each question separately, with its own question_id and only the part of what they said that answers it."
     return said, note

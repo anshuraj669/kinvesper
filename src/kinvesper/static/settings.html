@@ -363,7 +363,7 @@
 
   let state = null, saved = "", errors = {}, open = new Set(), current = "person";
   const clone = (x) => JSON.parse(JSON.stringify(x));
-  const snapshot = () => JSON.stringify({ p: state.profile, m: state.medications, c: state.contacts });
+  const snapshot = () => JSON.stringify({ p: state.profile, m: state.medications, c: state.contacts, w: state.safe_word || "" });
 
   function h(tag, attrs = {}, ...kids) {
     const el = document.createElement(tag);
@@ -765,7 +765,11 @@
         h("div", { class: "actions-row" }, h("span", { class: "hint" }, "Add:"),
           ...CONTACT_PRESETS.map(([label, relation]) => h("button", { class: "preset", type: "button",
             onclick: () => { state.contacts.push({ name: "", relation, phone: "" }); changed(); render(); focusLast("#contacts .item input"); } }, `+ ${label}`)),
-          h("button", { class: "preset", type: "button", onclick: () => { state.contacts.push({ name: "", relation: "", phone: "" }); changed(); render(); focusLast("#contacts .item input"); } }, "+ Someone else"))]),
+          h("button", { class: "preset", type: "button", onclick: () => { state.contacts.push({ name: "", relation: "", phone: "" }); changed(); render(); focusLast("#contacts .item input"); } }, "+ Someone else")),
+        h("div", { class: "grid", style: "margin-top:18px" },
+          field("Family safe word", state, "safe_word", { wide: true, placeholder: "e.g. sunflower", autocomplete: "off",
+            hint: `A secret word the family agrees on. When a caller says they're family ("it's me, your grandson") and asks for help or money, Kinvesper tells ${p.preferred_name || "them"} to ask for it, and checks what the caller said without ever saying the word. A voice-cloned scammer won't know it. Tell the family in person, not by text.` })),
+        state.safe_word ? note("good", "Safe word set. Kinvesper never says it aloud or shows it on the Echo.") : null]),
       section("medicines", "Medicines", "Kinvesper reminds, logs doses and orders refills from this list. Click one to edit it.", [
         errors.meds ? h("p", { class: "error-text" }, errors.meds) : null,
         scanPanel(), findingsPanel(),
@@ -828,7 +832,8 @@
     $("save").disabled = true; say("Saving…");
     try {
       const body = { profile: { ...state.profile, caregiver_phone: clean(state.profile.caregiver_phone), backup_phone: clean(state.profile.backup_phone) },
-        medications: state.medications.map((m) => ({ ...m, pills_remaining: Number(m.pills_remaining) })), contacts: state.contacts };
+        medications: state.medications.map((m) => ({ ...m, pills_remaining: Number(m.pills_remaining) })), contacts: state.contacts,
+        safe_word: (state.safe_word || "").trim() };
       state = await call("PUT", "/api/settings", body);
       saved = snapshot(); open.clear();
       Object.assign(scan, { added: 0, notes: "", error: "", known: [], asNeeded: [] });
@@ -846,7 +851,7 @@
   $("photo").addEventListener("change", (e) => { scanPhoto(e.target.files[0]); e.target.value = ""; });
   function restore() {
     const s = JSON.parse(saved);
-    state.profile = s.p; state.medications = s.m; state.contacts = s.c;
+    state.profile = s.p; state.medications = s.m; state.contacts = s.c; state.safe_word = s.w;
     errors = {}; open.clear(); render(); changed(); toast("Changes discarded");
   }
   $("discard").onclick = restore;

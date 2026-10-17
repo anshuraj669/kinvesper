@@ -32,7 +32,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
-from . import notify, telegram
+from . import media, notify, telegram
 from .config import settings
 from .models import ScanResult
 from .scheduler import check_once
@@ -157,6 +157,18 @@ def dashboard_routes(service: CareService) -> list[Route]:
         except SettingsError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
+    async def family_media(request: Request) -> Response:
+        """A voice note or photo from the family's Telegram chat. The signed link stands in for the dashboard
+        key, because the Echo fetches it with no headers of ours."""
+        mid, q = request.path_params["message_id"], request.query_params
+        if not media.signature_ok(mid, q.get("e", ""), q.get("s", "")):
+            return Response(status_code=403)
+        found = await service.family_media(mid)
+        if found is None:
+            return Response(status_code=404)
+        data, media_type = found
+        return Response(data, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
+
     async def check_interactions(request: Request) -> Response:
         if denied := guard(request):
             return denied
@@ -177,7 +189,14 @@ def dashboard_routes(service: CareService) -> list[Route]:
             trusted = body.get("contacts")
             if trusted is not None and not isinstance(trusted, list):
                 raise SettingsError("Send the trusted contacts as a list.")
-            return JSONResponse(await service.update_settings(body.get("profile") or {}, body["medications"], trusted))
+            word = str(body.get("safe_word") or "") if "safe_word" in body else None
+            if word is not None:
+                service.check_safe_word_setting(word)  # before anything is saved
+            saved = await service.update_settings(body.get("profile") or {}, body["medications"], trusted)
+            if word is not None:
+                service.set_safe_word(word)
+                saved["safe_word"] = service.safe_word()
+            return JSONResponse(saved)
         except (SettingsError, ValueError) as e:
             return JSONResponse({"error": str(e) if isinstance(e, SettingsError) else "Invalid request"}, status_code=400)
 
@@ -237,6 +256,7 @@ def dashboard_routes(service: CareService) -> list[Route]:
         Route("/api/medications/interactions", check_interactions, methods=["POST"]),
         Route("/api/calls/{alert_id}/ack", call_ack, methods=["POST"]),
         Route("/api/telegram/webhook", telegram_webhook, methods=["POST"]),
+        Route("/media/{message_id}", family_media),
         Route("/api/telegram/link", telegram_link, methods=["POST"]),
         Route("/api/telegram/unlink", telegram_link, methods=["POST"]),
     ]

@@ -41,6 +41,7 @@ from .models import (
     NotifyResult,
     RefillResult,
     ReminderResult,
+    SafeWordResult,
     ScamAssessment,
     ScheduleResult,
 )
@@ -56,6 +57,8 @@ connected to family. You are talking to the older adult by voice unless told oth
 - If log_medication_dose returns already_taken, clearly tell them NOT to take another.
 - If someone describes a call, text or email asking for money, gift cards, secrecy or personal
   details, call check_for_scam before giving any other advice.
+- When a caller claiming to be family or a friend gave a word for the family safe word, call
+  check_safe_word with what they said. You never know the safe word: don't guess it or hint at it.
 - For a fall, chest pain, trouble breathing or any emergency, call emergency_help immediately.
 - When they're running low or ask for more pills, offer request_pharmacy_refill. It runs as a
   task when the client supports tasks: tell them it's underway and share the result when ready.
@@ -63,7 +66,8 @@ connected to family. You are talking to the older adult by voice unless told oth
   check_medicine_interactions. Never say a combination is safe yourself.
 - When they ask for messages, or at the start of a conversation if they haven't heard them, use
   get_family_messages. A message with question=true was asked from Telegram and its sender is
-  waiting: read it, and when they answer, call answer_family_question with their answer.
+  waiting: read it, and when they answer, call answer_family_question with their answer and the
+  message's id as question_id.
 - If they're lonely, bored or want to chat, use start_conversation and talk with them about their
   life, one gentle question at a time. When they share a memory, save it with save_memory.
 """
@@ -259,6 +263,21 @@ def build_server(service: CareService) -> KinvesperMCP:
         return service.find_contact(who)
 
     @mcp.tool(
+        title="Family safe word",
+        icons=icon("shield", RED),
+        description=(
+            "Check the word a caller gave against the family's secret safe word, e.g. 'he says he's my grandson, the "
+            "word he said was sunflower'. Answers yes or no and never reveals the word. A wrong word alerts the family."
+        ),
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True),
+    )
+    async def check_safe_word(
+        word: Annotated[str, Field(description="The word or phrase the caller said, exactly as the person repeats it")],
+    ) -> SafeWordResult:
+        service.touch_activity()  # any interaction counts as activity
+        return await service.check_safe_word(word)
+
+    @mcp.tool(
         title="Daily check-in",
         icons=icon("heart", PURPLE),
         description="Record how the person is feeling today. Alerts family if they're unwell or report a fall, pain, dizziness.",
@@ -388,9 +407,11 @@ def build_server(service: CareService) -> KinvesperMCP:
     )
     async def answer_family_question(
         answer: Annotated[str, Field(description="Their answer, in their own words (e.g. \"Yes, I took them after breakfast\")")],
+        question_id: Annotated[str, Field(description="The id of the question it answers (from get_family_messages or the "
+                                                      "update that read it out); empty for the latest")] = "",
     ) -> NotifyResult:
         service.touch_activity()  # any interaction counts as activity
-        return await service.answer_family_question(answer)
+        return await service.answer_family_question(answer, question_id)
 
     @mcp.tool(
         title="Let's chat",

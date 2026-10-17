@@ -15,6 +15,7 @@ With OAuth off (local dev) the simulator is open. With OAuth on it needs SERVICE
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import time
@@ -25,7 +26,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from . import llm, reminders, speech
+from . import llm, media, reminders, speech
 from .config import now, settings
 from .service import CareService, heard_messages
 from .voice import Announcement, VoiceSession, VoiceSessions
@@ -66,7 +67,9 @@ def due_rings(service: CareService, session: VoiceSession) -> list[Announcement]
     if service.family_messages(unheard_only=True):  # typed in the dashboard or Telegram: the "Echo" reads them out
         for m in service.take_family_messages().messages:
             said, note = heard_messages([m], locale, session.patient)
-            out.append(Announcement(text=said, ring="message"))
+            out.append(Announcement(text=said, ring="message", sender=m.sender,
+                                    audio_url=media.url(m.id) if m.media == "voice" else "",
+                                    image_url=media.url(m.id) if m.media == "photo" else ""))
             if note:  # her next words are likely the answer
                 session.notes.append(note)
     return out
@@ -75,6 +78,7 @@ def due_rings(service: CareService, session: VoiceSession) -> list[Announcement]
 def voice_routes(sessions: VoiceSessions, service: CareService | None = None) -> list[Route]:
     page = files("kinvesper").joinpath("static/voice.html").read_text()
     last_check: dict[str, float] = {}
+    background: set[asyncio.Task] = set()
 
     def guard(request: Request) -> Response | None:
         if reason := simulator_status():
@@ -130,6 +134,12 @@ def voice_routes(sessions: VoiceSessions, service: CareService | None = None) ->
         if not text:
             return JSONResponse({"error": "Say something first"}, status_code=400)
         result = await session.turn(text[:MAX_UTTERANCE])
+        spoken, session.recording = session.recording, None
+        if (service is not None and spoken and spoken[0] == text
+                and any(c.name in ("answer_family_question", "notify_caregiver") and not c.is_error for c in result.tool_calls)):
+            task = asyncio.create_task(service.send_answer_voice(spoken[1]))  # their own voice, after the text answer
+            background.add(task)
+            task.add_done_callback(background.discard)
         return JSONResponse(result.model_dump())
 
     async def transcribe(request: Request) -> Response:
@@ -145,6 +155,7 @@ def voice_routes(sessions: VoiceSessions, service: CareService | None = None) ->
             text = await speech.transcribe(audio, session.vocabulary)
         except speech.SpeechUnavailable as e:
             return JSONResponse({"error": str(e)}, status_code=422)
+        session.recording = (text[:MAX_UTTERANCE], audio)
         return JSONResponse({"text": text[:MAX_UTTERANCE]})
 
     async def speak(request: Request) -> Response:

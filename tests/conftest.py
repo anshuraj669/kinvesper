@@ -22,7 +22,7 @@ from kinvesper.store import JsonStore
 @pytest.fixture
 def service(tmp_path) -> CareService:
     store = JsonStore(str(tmp_path / "state.json"))
-    seed(store)
+    seed(store, history=False)
     return CareService(store)
 
 

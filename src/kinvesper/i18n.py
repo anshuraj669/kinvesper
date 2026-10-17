@@ -40,6 +40,8 @@ TEXT = {
         "checkin_prompt": "Hello {name}, it's Kinvesper checking in. Please let me know you're okay. Just say: Alexa, tell kin vesper I'm fine.",
         "family_message": "{name}, you have a message from {sender}: {text}",
         "family_question": "{name}, {sender} is asking: {text}",
+        "family_voice": "{name}, {sender} sent you a voice message.",
+        "family_photo": "{name}, {sender} sent you a photo. {text}",
     },
     "hi": {
         "welcome": ("नमस्ते {name}, मैं Kinvesper हूँ। आप अपनी दवाइयों के बारे में पूछ सकते हैं, बता सकते हैं कि दवाई ले ली, "
@@ -72,6 +74,8 @@ TEXT = {
         "checkin_prompt": "नमस्ते {name}, Kinvesper आपका हाल पूछ रहा है। बस कहिए: Alexa, kin vesper से कहो मैं ठीक हूँ।",
         "family_message": "{name}, {sender} का संदेश आया है: {text}",
         "family_question": "{name}, {sender} पूछ रहे हैं: {text}",
+        "family_voice": "{name}, {sender} ने आपको आवाज़ में संदेश भेजा है।",
+        "family_photo": "{name}, {sender} ने आपको एक फ़ोटो भेजी है। {text}",
     },
 }
 
