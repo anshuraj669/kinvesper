@@ -40,7 +40,7 @@ from . import apl, llm
 from .config import settings
 from .i18n import lang, t
 from .reminders import SCOPE, TIMER_SCOPE, EchoReminders, spoken_times
-from .service import CareService
+from .service import CareService, heard_messages
 from .voice import VoiceSession, VoiceSessions
 
 log = logging.getLogger(__name__)
@@ -232,8 +232,8 @@ class AlexaBridge:
             welcome = t(locale, "welcome", name=session.patient, caregiver=session.caregiver, anything=anything)
             if self.service and self.service.family_messages(unheard_only=True):
                 news = self.service.take_family_messages().messages
-                said = " ".join(t(locale, "family_message", name=session.patient, sender=m.sender, text=m.text) for m in news)
-                session.notes.append(f"They just heard these family messages: {said}")
+                said, note = heard_messages(news, locale, session.patient)
+                session.notes.append(f"They just heard these family messages: {said} {note}".strip())
                 welcome = f"{said} {t(locale, 'reprompt')}"
             return speak(welcome, end=False, reprompt=t(locale, "reprompt"))
         if kind != "IntentRequest":

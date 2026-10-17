@@ -12,11 +12,11 @@ import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
-from kinvesper import telegram
+from kinvesper import llm, telegram
 from kinvesper.config import now
 from kinvesper.dashboard import dashboard_routes
 from kinvesper.models import Alert, TelegramLink
-from kinvesper.service import SettingsError
+from kinvesper.service import ANSWER_NOW, SettingsError, heard_messages
 
 TOKEN = "123456789:AAH" + "x" * 32
 CHAT, STRANGER = 555001, 999999
@@ -206,3 +206,57 @@ def test_delivered_elsewhere_reads_the_webhook(bot, monkeypatch):
     assert asyncio.run(telegram.delivered_elsewhere()) == "https://kinvesper.example.com"
     monkeypatch.setattr(telegram, "settings", dataclasses.replace(telegram.settings, public_url="https://kinvesper.example.com"))
     assert asyncio.run(telegram.delivered_elsewhere()) == ""
+
+
+def test_a_question_from_telegram_gets_her_answer_back(service, bot):
+    _, post = webhook(service)
+    link(service, post)
+    post(message("Ask her does she take her pills today ?"))
+    assert "send you the answer here" in sent(bot)[-1]["text"]
+    asked = service.family_messages()[0]
+    assert asked.question and asked.telegram_chat == str(CHAT) and asked.telegram_message_id == 7
+    assert asked.text == "Does she take her pills today ?" and asked.asked == "Ask her does she take her pills today ?"
+
+    heard = service.take_family_messages()
+    assert heard.message == "Priya is asking: Does she take her pills today ?"
+    said, note = heard_messages(heard.messages, "en-US", "Margaret")
+    assert said == "Margaret, Priya is asking: Does she take her pills today ?" and "answer_family_question" in note
+
+    result = asyncio.run(service.answer_family_question("Yes, I took my pills."))
+    assert result.sent and "sent your answer to Priya" in result.message
+    reply = sent(bot)[-1]
+    assert reply["chat_id"] == str(CHAT) and reply["reply_parameters"]["message_id"] == 7
+    assert "Margaret answered" in reply["text"] and "You asked: Ask her does she take her pills today ?" in reply["text"]
+    assert reply["text"].endswith("Yes, I took my pills.")
+    assert not asyncio.run(service.answer_family_question("Also, it's sunny")).sent  # one answer per question
+
+
+def test_only_questions_wait_for_an_answer(service, bot):
+    _, post = webhook(service)
+    link(service, post)
+    post(message("Love you Mum, see you on Sunday"))
+    assert "send you the answer" not in sent(bot)[-1]["text"]
+    heard = service.take_family_messages()
+    assert heard_messages(heard.messages, "en-US", "Margaret")[1] == ""
+    assert not asyncio.run(service.answer_family_question("Love you too")).sent
+
+
+def test_claude_rewords_the_question_for_her(service, bot, monkeypatch):
+    async def structured(system, content, schema, max_tokens=2048):
+        assert "Margaret" in system and content == "ask mum if she slept well"
+        return {"question": True, "say": "Did you sleep well?"}
+    monkeypatch.setattr(llm, "structured", structured)
+    _, post = webhook(service)
+    link(service, post)
+    post(message("ask mum if she slept well"))
+    assert service.family_messages()[0].text == "Did you sleep well?"
+    assert "will ask Margaret “Did you sleep well?”" in sent(bot)[-1]["text"]
+
+
+def test_messaging_the_asker_right_after_the_question_answers_it(service, bot):
+    _, post = webhook(service)
+    link(service, post)
+    post(message("Did you eat lunch?"))
+    service.take_family_messages()
+    assert service.family_question(within=ANSWER_NOW, sender="Priya")
+    assert not service.family_question(within=ANSWER_NOW, sender="Ravi")

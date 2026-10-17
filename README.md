@@ -212,6 +212,7 @@ caregiver presses Start, every alert arrives in that chat:
 | **✅ I'm on it** (or `OK`) | The alert is marked handled on the dashboard |
 | **📋 Status** (or `/status`) | Today's doses taken and missed, the last check-in mood, open alerts |
 | anything else | Saved as a family message and read out on the Echo next time |
+| a question ("ask her if she ate") | The Echo asks her, and her spoken answer comes back to the chat as a reply |
 
 The backup contact can connect too, for escalations. The weekly report goes to the caregiver's
 chat. Only linked chats count, and the webhook checks Telegram's secret header.

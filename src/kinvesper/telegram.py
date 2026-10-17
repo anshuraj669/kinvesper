@@ -94,13 +94,15 @@ def alert_buttons(alert_id: str) -> dict:
     return buttons([("✅ I'm on it", f"ack:{alert_id}"), ("📋 Status", "status")])
 
 
-async def send(chat_id: str, html: str, markup: dict | None = None) -> bool:
+async def send(chat_id: str, html: str, markup: dict | None = None, reply_to: int | None = None) -> bool:
     """A message to a linked chat (Telegram HTML: <b>, <i>, escaped text). True when delivered."""
     if not chat_id:
         return False
     params = {"chat_id": chat_id, "text": html[:4000], "parse_mode": "HTML", "link_preview_options": {"is_disabled": True}}
     if markup:
         params["reply_markup"] = markup
+    if reply_to:  # shown as a reply to that message in the chat
+        params["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
     return await call("sendMessage", **params) is not None
 
 

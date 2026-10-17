@@ -13,7 +13,7 @@ from html import escape
 
 import anyio
 
-from . import contacts, interactions, llm, notify, scam, telegram, when
+from . import contacts, i18n, interactions, llm, notify, scam, telegram, when
 from .config import now, settings
 from .models import (
     Alert,
@@ -106,6 +106,21 @@ PROFILE_FIELDS = ("patient_name", "preferred_name", "caregiver_name", "caregiver
                   "emergency_number", "checkin_time")
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 LINK_LIFETIME = timedelta(minutes=30)
+ANSWER_WAIT = timedelta(hours=12)  # how long a question from Telegram waits for its answer
+ANSWER_NOW = timedelta(minutes=10)  # a message for the asker this soon after hearing the question answers it
+QUESTION_START = re.compile(r"^(ask|did|do|does|are|is|was|were|have|has|had|how|what|when|where|which|who|why|can|could|"
+                            r"will|would|should|shall|may)\b", re.IGNORECASE)
+ASK_PREFIX = re.compile(r"^(please\s+)?(ask|check with)\s+(her|him|them|mum|mom|mother|dad|father|grandma|grandpa|nana|"
+                        r"nani|dadi|\w+)\s*(if|whether|about)?\s*[,:-]?\s*", re.IGNORECASE)
+RELAY_SYSTEM = """\
+A family member typed a message in a chat for {name}, an older adult, to be read aloud to them by their
+Echo. Decide whether it asks {name} something that needs an answer back ("Ask her if she ate", "did you
+sleep well?", "how was the doctor?"). Then write `say`: the words to read to {name}, spoken to them
+directly and kept short. Reword only messages written about {name} or as an instruction to relay ("ask
+her does she take her pills today" becomes "Did you take your pills today?", "tell mum I love her"
+becomes "I love you"); otherwise keep the message exactly as typed, in its own language."""
+RELAY_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["question", "say"],
+                "properties": {"question": {"type": "boolean"}, "say": {"type": "string"}}}
 ACK_WORDS = {"ok", "okay", "k", "1", "yes", "on it", "i'm on it", "im on it", "got it", "done", "handled", "seen", "👍"}
 STATUS_WORDS = {"status", "update", "today", "how is she", "how is he", "how is mum", "how is mom", "how is dad", "?"}
 IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
@@ -947,7 +962,7 @@ class CareService:
         if not text:
             await telegram.send(chat_id, "I can only pass on typed messages for now.")
             return
-        answer = await self.contact_reply(who[1], text)
+        answer = await self.contact_reply(who[1], text, chat=chat_id, message_id=msg.get("message_id"))
         await telegram.send(chat_id, escape(answer), telegram.buttons([("📋 Status", "status")]))
 
     async def _telegram_start(self, chat_id: str, code: str, tg_name: str) -> None:
@@ -1012,7 +1027,7 @@ class CareService:
         lines.append(f"Open alerts: {'; '.join(a.title for a in open_alerts[:3])}." if open_alerts else "No open alerts.")
         return "\n".join(lines)
 
-    async def contact_reply(self, who: str, text: str) -> str:
+    async def contact_reply(self, who: str, text: str, chat: str = "", message_id: int | None = None) -> str:
         """A message from the caregiver or the backup contact. OK acknowledges the newest open alert,
         STATUS sums up today, HELP explains, anything else is read out on the Echo."""
         p, said = self.profile(), " ".join(text.split())
@@ -1030,8 +1045,53 @@ class CareService:
         if word == "help":
             return (f"Tap ✅ I'm on it on an alert (or send OK) to mark it handled. Send STATUS for today. "
                     f"Anything else you type is read to {p.preferred_name} on the Echo. Send /stop to stop alerts here.")
-        self.send_family_message(said, sender=who)
+        if not chat:
+            self.send_family_message(said, sender=who)
+            return f"Got it. Kinvesper will read your message to {p.preferred_name} the next time they talk to Alexa."
+        question, say = await self._relay_wording(said, p.preferred_name)
+        msg = self.send_family_message(say, sender=who)
+        if question:
+            msg = msg.model_copy(update={"question": True, "asked": said, "telegram_chat": chat,
+                                         "telegram_message_id": message_id})
+            self.store.save("message", msg)
+            return (f"Got it. Kinvesper will ask {p.preferred_name} “{say}” the next time they talk to Alexa, "
+                    "and send you the answer here.")
+        if say != said:
+            msg = msg.model_copy(update={"asked": said})
+            self.store.save("message", msg)
         return f"Got it. Kinvesper will read your message to {p.preferred_name} the next time they talk to Alexa."
+
+    async def _relay_wording(self, text: str, name: str) -> tuple[bool, str]:
+        """Whether a typed message asks the person something, and the words to read out to them."""
+        out = await llm.structured(RELAY_SYSTEM.format(name=name), text, RELAY_SCHEMA, max_tokens=300)
+        if out and isinstance(out.get("say"), str) and out["say"].strip():
+            return bool(out.get("question")), " ".join(out["say"].split())[:500]
+        question = "?" in text or bool(QUESTION_START.match(text))
+        say = ASK_PREFIX.sub("", text) if re.match(r"^(please\s+)?(ask|check with)\b", text, re.IGNORECASE) else text
+        return question, (say[:1].upper() + say[1:]) or text
+
+    def family_question(self, within: timedelta = ANSWER_WAIT, sender: str = "") -> FamilyMessage | None:
+        """The newest question from Telegram that the person has heard but not answered yet."""
+        since = (now() - within).isoformat()
+        return next((m for m in self.family_messages() if m.question and m.heard_at and m.heard_at >= since
+                      and not m.answered_at and (not sender or m.sender == sender)), None)
+
+    async def answer_family_question(self, answer: str) -> NotifyResult:
+        """The person's answer to a question the family asked from Telegram, sent back to that chat."""
+        answer = " ".join(answer.split())
+        if not answer:
+            return NotifyResult(sent=False, message="What would you like me to tell them?")
+        q = self.family_question()
+        if q is None:
+            return NotifyResult(sent=False, message="There's no question from the family waiting for an answer.")
+        p = self.profile()
+        sent = await telegram.send(q.telegram_chat, f"💬 <b>{escape(p.preferred_name)} answered</b>\n"
+                                                    f"<i>You asked: {escape(q.asked or q.text)}</i>\n\n{escape(answer)}",
+                                   telegram.buttons([("📋 Status", "status")]), reply_to=q.telegram_message_id)
+        self.store.save("message", q.model_copy(update={"answer": answer[:500], "answered_at": now().isoformat()}))
+        if not sent:  # Telegram unreachable: the caregiver still gets it the usual way
+            return await self.message_caregiver(f"Answer to “{q.asked or q.text}”: {answer}")
+        return NotifyResult(sent=True, message=f"Okay, I've sent your answer to {q.sender}.")
 
     async def _telegram_alert(self, alert: Alert, chat: str, title: str = "", detail: str = "") -> bool:
         if not chat:
@@ -1179,8 +1239,10 @@ class CareService:
             self.store.save("message", m)
         if len(unheard) == 1:
             m = unheard[0]
+            if m.question:
+                return MessagesResult(messages=unheard, message=f"{m.sender} is asking: {m.text}")
             return MessagesResult(messages=unheard, message=f"You have a message from {m.sender}: {m.text}")
-        said = " Next: ".join(f"from {m.sender}: {m.text}" for m in unheard)
+        said = " Next: ".join(f"{m.sender} asks: {m.text}" if m.question else f"from {m.sender}: {m.text}" for m in unheard)
         return MessagesResult(messages=unheard, message=f"You have {len(unheard)} messages. First, {said}")
 
     # ---------- companionship ----------
@@ -1402,3 +1464,15 @@ class CareService:
                     if overdue and (date, m.id, t) not in taken and self._expected(m, _at(day, t), since):
                         out.append(f"{day.strftime('%a')} {spoken_time(t)} {m.name}")
         return out
+
+
+def heard_messages(messages: list[FamilyMessage], locale: str, name: str) -> tuple[str, str]:
+    """Family messages as the Echo reads them out, and a note telling the voice model which of them
+    wait for an answer (a question asked from Telegram goes back with answer_family_question)."""
+    said = " ".join(i18n.t(locale, "family_question" if m.question else "family_message", name=name, sender=m.sender, text=m.text)
+                    for m in messages)
+    asked = [m for m in messages if m.question]
+    note = " ".join(f"{m.sender} asked them “{m.text}” and is waiting for the answer in Telegram. Their next words "
+                    "are most likely the answer: call answer_family_question with it, in their own words (not "
+                    "notify_caregiver, and without asking to confirm)." for m in asked)
+    return said, note

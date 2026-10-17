@@ -44,7 +44,7 @@ from .models import (
     ScamAssessment,
     ScheduleResult,
 )
-from .service import CareService, clean_message, spoken_time
+from .service import ANSWER_NOW, CareService, clean_message, spoken_time
 
 INSTRUCTIONS = """\
 Kinvesper helps an older adult who lives alone manage medications, avoid scams and stay
@@ -62,7 +62,8 @@ connected to family. You are talking to the older adult by voice unless told oth
 - Before they take anything new (a painkiller, a supplement, a new prescription), call
   check_medicine_interactions. Never say a combination is safe yourself.
 - When they ask for messages, or at the start of a conversation if they haven't heard them, use
-  get_family_messages.
+  get_family_messages. A message with question=true was asked from Telegram and its sender is
+  waiting: read it, and when they answer, call answer_family_question with their answer.
 - If they're lonely, bored or want to chat, use start_conversation and talk with them about their
   life, one gentle question at a time. When they share a memory, save it with save_memory.
 """
@@ -275,7 +276,8 @@ def build_server(service: CareService) -> KinvesperMCP:
         icons=icon("message", TEAL),
         description=(
             "Send a message from the person to their caregiver (e.g. 'tell my daughter I'm going to the doctor'). "
-            "Asks the person to confirm first when the client supports it."
+            "Asks the person to confirm first when the client supports it. Not for answering a question the family "
+            "just asked: use answer_family_question for that."
         ),
         annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True),
     )
@@ -289,6 +291,8 @@ def build_server(service: CareService) -> KinvesperMCP:
         service.touch_activity()  # any interaction counts as activity
         caregiver = service.profile().caregiver_name
         message = clean_message(message, caregiver)
+        if service.family_question(within=ANSWER_NOW, sender=caregiver):  # they're answering what was just asked
+            return await service.answer_family_question(message)
         if not _can_elicit(ctx):
             return await service.message_caregiver(message, urgent)
         answer = await ctx.elicit(f'Send this to {caregiver}? "{message}"', SendConfirmation)
@@ -371,6 +375,22 @@ def build_server(service: CareService) -> KinvesperMCP:
     def get_family_messages() -> MessagesResult:
         service.touch_activity()  # any interaction counts as activity
         return service.take_family_messages()
+
+    @mcp.tool(
+        title="Answer the family",
+        icons=icon("message", TEAL),
+        description=(
+            "Send the person's answer to a question the family asked them from Telegram (e.g. Priya asked 'did you "
+            "take your pills today?' and they said 'yes, all of them'). Use it right after they answer a question "
+            "from get_family_messages or one just read out to them."
+        ),
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True),
+    )
+    async def answer_family_question(
+        answer: Annotated[str, Field(description="Their answer, in their own words (e.g. \"Yes, I took them after breakfast\")")],
+    ) -> NotifyResult:
+        service.touch_activity()  # any interaction counts as activity
+        return await service.answer_family_question(answer)
 
     @mcp.tool(
         title="Let's chat",

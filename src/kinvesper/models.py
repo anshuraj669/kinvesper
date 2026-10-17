@@ -126,6 +126,13 @@ class FamilyMessage(BaseModel):
     text: str
     created_at: str
     heard_at: str | None = None
+    # A question asked from Telegram: the answer goes back to that chat (answer_family_question).
+    question: bool = False
+    asked: str = ""  # what they typed, when `text` was reworded to be read out
+    telegram_chat: str = ""
+    telegram_message_id: int | None = None
+    answer: str = ""
+    answered_at: str | None = None
 
 
 class Memory(BaseModel):
