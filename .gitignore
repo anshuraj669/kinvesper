@@ -37,3 +37,6 @@ cdk.context.json
 
 # screenshots shared during development
 /img.png
+img*.png
+img*.jpeg
+img*.jpg
