@@ -189,3 +189,20 @@ def test_off_without_a_token(service):
     assert not telegram.enabled()
     with pytest.raises(SettingsError, match="isn't set up"):
         asyncio.run(service.telegram_link("caregiver"))
+
+
+def test_connect_is_refused_when_the_bots_chats_go_to_another_server(service, bot, monkeypatch):
+    async def deployed():
+        return "https://kinvesper.example.com"
+    monkeypatch.setattr(telegram, "delivered_elsewhere", deployed)
+    with pytest.raises(SettingsError, match="kinvesper.example.com/dashboard/settings"):
+        asyncio.run(service.telegram_link("caregiver"))
+
+
+def test_delivered_elsewhere_reads_the_webhook(bot, monkeypatch):
+    def api(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "result": {"url": "https://kinvesper.example.com/api/telegram/webhook"}})
+    monkeypatch.setattr(telegram, "_transport", httpx.MockTransport(api))
+    assert asyncio.run(telegram.delivered_elsewhere()) == "https://kinvesper.example.com"
+    monkeypatch.setattr(telegram, "settings", dataclasses.replace(telegram.settings, public_url="https://kinvesper.example.com"))
+    assert asyncio.run(telegram.delivered_elsewhere()) == ""

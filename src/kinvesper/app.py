@@ -71,6 +71,7 @@ def main() -> None:
     parser.add_argument("--check", action="store_true", help="run the proactive checks once and exit (for a cron/EventBridge trigger)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # its request lines include the Telegram bot token
 
     if args.seed:
         seed(make_store())

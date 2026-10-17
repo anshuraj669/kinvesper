@@ -892,6 +892,10 @@ class CareService:
             raise SettingsError("Connect Telegram for the caregiver or the backup contact.")
         if not telegram.enabled():
             raise SettingsError("Telegram isn't set up on this server yet (see telegram/README.md).")
+        if elsewhere := await telegram.delivered_elsewhere():
+            raise SettingsError(f"The bot's chats go to {elsewhere}, so pressing Start there wouldn't reach this "
+                                f"server. Connect from {elsewhere}/dashboard/settings, or run make telegram-local "
+                                "to use the bot with this one.")
         current = now()
         for old in self.store.load_all("tglink", TelegramLink):  # expired or replaced codes
             if old.audience == audience or old.created_at < (current - LINK_LIFETIME).isoformat():

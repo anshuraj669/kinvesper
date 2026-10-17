@@ -68,6 +68,19 @@ async def bot_username() -> str:
     return _username or ""
 
 
+async def delivered_elsewhere() -> str:
+    """The server Telegram delivers this bot's chats to, when it isn't this one (else "").
+
+    Linking only works on the server that receives the Start message: with the webhook on the deployed
+    service, a Connect link made by a local server would be answered by the deployed one, which has
+    never seen the code. Locally, telegram/poll.py removes the webhook while it relays.
+    """
+    url = ((await call("getWebhookInfo")) or {}).get("url") or ""
+    if not url or url.startswith(settings.base_url.rstrip("/") + "/"):
+        return ""
+    return url.split("/api/")[0]
+
+
 async def link_url(code: str) -> str:
     name = await bot_username()
     return f"https://t.me/{name}?start={code}" if name else ""
