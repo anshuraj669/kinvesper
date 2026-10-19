@@ -1,4 +1,4 @@
-.PHONY: help dev dev-aws test seed login claude-key twilio telegram telegram-local
+.PHONY: help dev dev-aws test seed login google-login claude-key twilio telegram telegram-local
 
 help:  ## List the commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -15,8 +15,11 @@ test:  ## Run the app and infrastructure tests
 seed:  ## Reset local data to the demo household
 	uv run kinvesper --seed
 
-login:  ## Create the Alexa account-linking login: make login EMAIL=you@example.com
+login:  ## Create a family login (dashboard sign-in, Alexa account linking): make login EMAIL=you@example.com
 	@./scripts/create_login.sh "$(EMAIL)"
+
+google-login:  ## Store the Google OAuth client secret for "Continue with Google" (then deploy with -c googleClientId=...)
+	@./scripts/set_google_login.sh
 
 claude-key:  ## Store the Claude API key for the deployed voice agent (deploy with -c llmProvider=anthropic)
 	@./scripts/set_claude_key.sh

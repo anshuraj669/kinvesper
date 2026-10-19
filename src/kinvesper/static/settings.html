@@ -344,6 +344,12 @@
   const key = new URLSearchParams(location.search).get("key") || "";
   const headers = key ? { "X-Dashboard-Key": key, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
   if (key) document.getElementById("back").href = `/dashboard?key=${encodeURIComponent(key)}`;
+  // Signed in rather than opened with ?key=: an expired session goes back to the sign-in page.
+  const fetch = async (...args) => {
+    const r = await window.fetch(...args);
+    if (r.status === 401 && !key) location.href = `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    return r;
+  };
   const $ = (id) => document.getElementById(id);
   const ICONS = {
     good: '<circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',

@@ -84,6 +84,12 @@ class Settings:
     simulator_key: str = field(default_factory=lambda: _env("SIMULATOR_KEY"))
     # Access key for the caregiver dashboard when OAuth is on (open /dashboard?key=...).
     dashboard_key: str = field(default_factory=lambda: _env("DASHBOARD_KEY"))
+    # Caregiver sign-in on the dashboard (signin.py): the Cognito app client for it. Empty = ?key= links only.
+    login_client_id: str = field(default_factory=lambda: _env("LOGIN_CLIENT_ID"))
+    # Emails that may sign in with Google besides the caregiver's and backup's in Settings (comma-separated).
+    caregiver_logins: str = field(default_factory=lambda: _env("CAREGIVER_LOGINS"))
+    # "required": the Alexa skill answers only once a family login is linked in the Alexa app.
+    alexa_account_linking: str = field(default_factory=lambda: _env("ALEXA_ACCOUNT_LINKING").lower())
     # Skill ID of the classic Alexa skill bridge (amzn1.ask.skill...); empty = /alexa is off.
     alexa_skill_id: str = field(default_factory=lambda: _env("ALEXA_SKILL_ID"))
 

@@ -13,7 +13,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
-from . import scheduler
+from . import scheduler, signin
 from .alexa import alexa_routes
 from .auth import metadata_routes
 from .config import settings
@@ -55,7 +55,8 @@ def create_app(service: CareService | None = None, voice: VoiceSessions | None =
                 await voice.close_all()
 
     routes = [
-        Route("/health", health), *metadata_routes(settings), *voice_routes(voice, service), *dashboard_routes(service),
+        Route("/health", health), *metadata_routes(settings),
+        *signin.signin_routes(lambda: signin.family_emails(service.profile())), *voice_routes(voice, service), *dashboard_routes(service),
         *listing_routes(), *alexa_routes(voice, service),
         Mount("/", app=mcp_app),
     ]

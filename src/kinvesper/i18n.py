@@ -22,6 +22,8 @@ TEXT = {
         "not_caught": "Sorry, I didn't catch that. Could you say it another way?",
         "cant_do": "Sorry, I can't do that yet.",
         "unreachable": "Sorry, I can't reach Kinvesper right now. Please try again in a minute.",
+        "link_account": "Kinvesper needs your family's login first. I've put a card in the Alexa app: open it, "
+                        "tap Link account, and sign in with the Kinvesper login.",
         "reminders_set": "Done. Every day at {times}, I'll remind you which medicines to take.",
         "reminders_declined": "Okay, no reminders for now. You can say, set up my pill reminders, any time.",
         "reminders_no_meds": "You don't have any medicines saved yet. Your family can add them in Kinvesper's settings.",
@@ -56,6 +58,8 @@ TEXT = {
         "not_caught": "माफ़ कीजिए, मैं समझ नहीं पाया। क्या आप दूसरे तरीके से कह सकते हैं?",
         "cant_do": "माफ़ कीजिए, मैं अभी यह नहीं कर सकता।",
         "unreachable": "माफ़ कीजिए, अभी Kinvesper से जुड़ नहीं पा रहा। एक मिनट बाद फिर कोशिश कीजिए।",
+        "link_account": "पहले Kinvesper को आपके परिवार का लॉगिन चाहिए। मैंने Alexa ऐप में एक कार्ड भेजा है: उसे खोलिए, "
+                        "Link account दबाइए, और Kinvesper लॉगिन से साइन इन कीजिए।",
         "reminders_set": "हो गया। मैं रोज़ {times} आपको याद दिलाऊँगा कि कौन सी दवाई लेनी है।",
         "reminders_declined": "ठीक है, अभी कोई रिमाइंडर नहीं। जब चाहें कहिए, मेरी दवाई के रिमाइंडर सेट करो।",
         "reminders_no_meds": "अभी कोई दवाई सेव नहीं है। आपका परिवार Kinvesper की सेटिंग में दवाइयाँ जोड़ सकता है।",

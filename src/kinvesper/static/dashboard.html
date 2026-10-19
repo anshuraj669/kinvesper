@@ -113,6 +113,7 @@
   .btn:disabled { opacity: .55; cursor: default; transform: none; }
   .btn svg { width: 16px; height: 16px; flex: none; }
   .btn.small { font-size: 13px; padding: 6px 12px; }
+  .btn[hidden] { display: none; }
 
   /* ---- layout ---- */
   main { max-width: 1220px; margin: 0 auto; padding: 22px 20px 48px; display: grid; gap: 18px; grid-template-columns: repeat(12, 1fr); }
@@ -337,6 +338,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
       <span class="label">Settings</span>
     </a>
+    <a class="btn" id="signOut" href="/auth/logout" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+      <span class="label">Sign out</span>
+    </a>
     <a class="btn primary" href="/voice" title="Voice simulator">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
       <span class="label">Voice simulator</span>
@@ -352,6 +357,18 @@
   const headers = key ? { "X-Dashboard-Key": key } : {};
   if (key) document.getElementById("settings").href = `/dashboard/settings?key=${encodeURIComponent(key)}`;
   if (key) document.getElementById("doctor").href = `/dashboard/doctor?key=${encodeURIComponent(key)}`;
+  // Signed in rather than opened with ?key=: an expired session goes back to the sign-in page.
+  const fetch = async (...args) => {
+    const r = await window.fetch(...args);
+    if (r.status === 401 && !key) location.href = `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    return r;
+  };
+  if (!key) window.fetch("/auth/me").then((r) => (r.ok ? r.json() : null)).then((me) => {
+    if (!me) return;
+    const out = document.getElementById("signOut");
+    out.hidden = false;
+    out.title = `Signed in as ${me.email || me.name}. Sign out`;
+  }).catch(() => {});
   const MOODS = ["great", "good", "okay", "low", "unwell"];
   const STATUS = {
     taken: ["good", "Taken"], due: ["warning", "Due now"], missed: ["critical", "Missed"], upcoming: ["muted", "Upcoming"],

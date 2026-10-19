@@ -68,7 +68,8 @@ If the CLI's manifest format differs, scaffold a fresh one and copy the store li
    alexa-ai configure-account-linking --addon-id <add-on ID> --config-file account-linking.json
    alexa-ai deploy
    ```
-   Authorization URL, token URL and scopes (`openid kinvesper/mcp`) come from the server's metadata.
+   Authorization URL, token URL and scopes (`openid email kinvesper/mcp`) come from the server's metadata.
+   `email` lets a Google login link only when it's one of the family's emails.
 4. Create the login the person signs in with when the Alexa app asks to link Kinvesper:
    ```bash
    make login EMAIL=margaret@example.com
@@ -138,6 +139,17 @@ and with the "trusted certificate" option Alexa fails the TLS check and says "un
 2. **Hindi:** in the language dropdown at the top left, **Language settings → Add new language →
    Hindi (IN)**, save, then switch to Hindi, paste `interactionModels/custom/hi-IN.json` into its
    JSON Editor, build, and set the same endpoint. Test it by switching the Test tab to Hindi.
+
+3. **Account linking** (optional, under Tools): the family links their Kinvesper login in the Alexa
+   app before the skill answers. Needs the stack deployed with `-c alexaVendorId=<vendor ID>`.
+   - **Auth Code Grant**, "Allow users to enable skill without account linking" **off**.
+   - Web Authorization URI: stack output `OAuthLogin` + `/oauth2/authorize`; Access Token URI:
+     `OAuthLogin` + `/oauth2/token`.
+   - Client ID: `AlexaClientId`; Client Secret: from `describe-user-pool-client` (section 3 above);
+     Authentication Scheme: **HTTP Basic**.
+   - Scopes: `openid`, `email`, `kinvesper/mcp`.
+   - Save, then redeploy the stack with `-c alexaAccountLinking=true`. In the Alexa app: **Skills →
+     Kinvesper → Link account**, and sign in with a login from `make login` (or Google).
 
 Or with the ASK CLI (`npm install -g ask-cli`, `ask configure`), which deploys all of it:
 

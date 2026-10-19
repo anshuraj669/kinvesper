@@ -135,6 +135,12 @@
   const key = params.get("key") || "";
   const headers = key ? { "X-Dashboard-Key": key } : {};
   if (key) document.getElementById("back").href = `/dashboard?key=${encodeURIComponent(key)}`;
+  // Signed in rather than opened with ?key=: an expired session goes back to the sign-in page.
+  const fetch = async (...args) => {
+    const r = await window.fetch(...args);
+    if (r.status === 401 && !key) location.href = `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    return r;
+  };
   const $ = (id) => document.getElementById(id);
   if (params.get("days")) $("days").value = params.get("days");
 

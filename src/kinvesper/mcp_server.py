@@ -24,6 +24,7 @@ from mcp.types import (
 )
 from pydantic import BaseModel, Field
 
+from . import signin
 from .auth import JwtTokenVerifier, auth_settings
 from .config import now, settings
 from .icons import AMBER, BLUE, GREEN, PURPLE, RED, SLATE, TEAL, icon
@@ -142,7 +143,8 @@ def build_server(service: CareService) -> KinvesperMCP:
         instructions=INSTRUCTIONS,
         website_url=settings.base_url,
         icons=icon("logo", TEAL),
-        token_verifier=JwtTokenVerifier(settings) if auth else None,
+        token_verifier=JwtTokenVerifier(settings, allow=signin.token_check(lambda: signin.family_emails(service.profile())))
+        if auth else None,
         auth=auth,
         transport_security=transport_security(),
         host=settings.host,

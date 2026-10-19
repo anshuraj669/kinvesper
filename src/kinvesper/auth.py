@@ -3,7 +3,8 @@
 Bearer tokens are JWTs checked against the issuer's JWKS: signature, expiry, issuer, audience
 (`aud`, or `client_id` on Cognito access tokens; OAUTH_AUDIENCE may list several app clients,
 e.g. MCP clients and Alexa+) and required scopes. The built-in voice simulator can also use a
-static SERVICE_TOKEN. Auth is off when OAUTH_ISSUER is empty.
+static SERVICE_TOKEN. Auth is off when OAUTH_ISSUER is empty. `allow` can refuse a valid token: a Google
+login that isn't one of the family's emails (signin.token_check).
 
 Discovery: Cognito's own metadata doesn't advertise PKCE S256, which Alexa+ checks before it
 deploys an add-on. So this server names itself as the authorization server and serves RFC 8414
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+from collections.abc import Awaitable, Callable
 
 import anyio
 import httpx
@@ -32,11 +34,13 @@ SERVICE_CLIENT_ID = "kinvesper-simulator"
 
 
 class JwtTokenVerifier:
-    def __init__(self, settings: Settings, jwks_client: jwt.PyJWKClient | None = None):
+    def __init__(self, settings: Settings, jwks_client: jwt.PyJWKClient | None = None,
+                 allow: Callable[[str, dict], Awaitable[bool]] | None = None):
         self.issuer = settings.oauth_issuer.rstrip("/")
         self.audiences = set(settings.oauth_audience.replace(",", " ").split())
         self.scopes = settings.oauth_scope_list
         self.service_token = settings.service_token
+        self.allow = allow
         self._jwks = jwks_client or jwt.PyJWKClient(settings.oauth_jwks_url or f"{self.issuer}/.well-known/jwks.json")
 
     async def verify_token(self, token: str) -> AccessToken | None:
@@ -59,6 +63,8 @@ class JwtTokenVerifier:
         client_id = claims.get("client_id") or claims.get("azp") or ""
         if self.audiences and not self.audiences & {*audiences, client_id}:
             log.info("Rejected bearer token: wrong audience")
+            return None
+        if self.allow and not await self.allow(token, claims):
             return None
         scopes = claims.get("scope", "").split()
         return AccessToken(

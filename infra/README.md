@@ -8,7 +8,7 @@ One CDK stack (`kinvesper_stack.py`) creates everything:
 | **Amazon ECR** | Holds the image that `cdk deploy` builds from the repo's `Dockerfile` |
 | **Amazon DynamoDB** | Single table (`pk` = patient, `sk` = `<kind>#<id>`), on-demand, point-in-time recovery |
 | **Claude** | The voice agent's brain: the Claude API with web search (default, key in Secrets Manager), or Amazon Bedrock with `-c llmProvider=bedrock` |
-| **Amazon Cognito** | OAuth 2.1 authorization server for `/mcp`: user pool, `kinvesper/mcp` scope, public PKCE client, hosted login |
+| **Amazon Cognito** | OAuth 2.1 authorization server for `/mcp`, dashboard sign-in and Alexa account linking: user pool, `kinvesper/mcp` scope, PKCE clients, hosted login, optional Google (`-c googleClientId=...`) |
 | **Amazon SNS** | Caregiver alert texts; a second topic for ops alarms |
 | **AWS Secrets Manager** | Generated `SERVICE_TOKEN`, `SIMULATOR_KEY`, `DASHBOARD_KEY` (never in the template or image) |
 | **Amazon EventBridge** | Calls `POST /api/checks` every 5 minutes (missed doses, inactivity, low stock) |
@@ -80,8 +80,9 @@ key <ServiceTokenSecret>     # → bearer token for MCP clients that skip OAuth
   `/.well-known/oauth-protected-resource/mcp`. Cognito has no dynamic client registration, so give
   the client `OAuthClientId` (in mcp-voice-simulator: `MCP_CLIENT_ID`) and add its redirect URL with
   `-c callbackUrls=...`. Or use the service token (`MCP_BEARER_TOKEN`).
-- **Caregiver logins** (self sign-up is off):
-  `aws cognito-idp admin-create-user --user-pool-id <UserPoolId> --username priya@example.com`
+- **Caregiver logins** (self sign-up is off): `make login EMAIL=priya@example.com`, then sign in at
+  `<SignIn>`. For "Continue with Google": `make google-login`, then redeploy with
+  `-c googleClientId=...` (see "Signing in" in the main README).
 - **Reset the demo data:**
   `STORE=dynamodb DYNAMODB_TABLE=<TableName> AWS_REGION=us-east-1 uv run kinvesper --seed`
 - **Logs:** CloudWatch → Log groups → `/aws/apprunner/kinvesper/...`

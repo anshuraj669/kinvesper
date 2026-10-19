@@ -18,8 +18,9 @@
     POST /api/medications/interactions  check medicines just added ({"medicines": [names]}) for interactions
     POST /api/calls/{id}/ack         Twilio, when the caregiver presses 1 on an alert call (signed by Twilio)
 
-Health data, so with OAuth on the dashboard needs DASHBOARD_KEY (open /dashboard?key=...) and is
-off without it. With OAuth off (local dev) it is open.
+Health data, so with OAuth on the dashboard needs a signed-in caregiver (LOGIN_CLIENT_ID, see
+signin.py) or DASHBOARD_KEY (open /dashboard?key=...; EventBridge's checks use it too), and is off
+with neither. With OAuth off (local dev) it is open.
 """
 
 from __future__ import annotations
@@ -29,10 +30,10 @@ import logging
 from importlib.resources import files
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from . import media, notify, telegram
+from . import media, notify, signin, telegram
 from .config import settings
 from .models import ScanResult
 from .scheduler import check_once
@@ -40,7 +41,7 @@ from .service import CareService, SettingsError
 
 log = logging.getLogger(__name__)
 
-OFF = "The caregiver dashboard is off: with OAuth on it needs DASHBOARD_KEY."
+OFF = "The caregiver dashboard is off: with OAuth on it needs LOGIN_CLIENT_ID or DASHBOARD_KEY."
 MAX_PHOTO_BYTES = 5 * 1024 * 1024  # Claude's limit for one image
 
 
@@ -49,28 +50,40 @@ def dashboard_routes(service: CareService) -> list[Route]:
     settings_page = files("kinvesper").joinpath("static/settings.html").read_text()
     doctor_page = files("kinvesper").joinpath("static/doctor.html").read_text()
 
+    def family() -> set[str]:
+        return signin.family_emails(service.profile())
+
     def guard(request: Request) -> Response | None:
         if not settings.oauth_issuer:
             return None
+        key = request.headers.get("x-dashboard-key", "")
+        if settings.dashboard_key and key and hmac.compare_digest(key, settings.dashboard_key):
+            return None
+        if signin.caregiver(request, family):
+            return None
+        if signin.enabled() and not key:
+            return JSONResponse({"error": "Please sign in again", "login": signin.login_url("/dashboard")}, status_code=401)
         if not settings.dashboard_key:
             return JSONResponse({"error": OFF}, status_code=404)
-        if not hmac.compare_digest(request.headers.get("x-dashboard-key", ""), settings.dashboard_key):
-            return JSONResponse({"error": "Missing or wrong dashboard key"}, status_code=403)
-        return None
+        return JSONResponse({"error": "Missing or wrong dashboard key"}, status_code=403)
 
-    def html(body: str) -> Response:
-        if settings.oauth_issuer and not settings.dashboard_key:
+    def html(request: Request, body: str) -> Response:
+        if not settings.oauth_issuer:
+            return HTMLResponse(body)
+        if signin.enabled() and not request.query_params.get("key") and not signin.caregiver(request, family):
+            return RedirectResponse(signin.login_url(request.url.path), status_code=302)
+        if not signin.enabled() and not settings.dashboard_key:
             return HTMLResponse(f"<p>{OFF}</p>", status_code=404)
         return HTMLResponse(body)
 
-    async def dashboard_page(_: Request) -> Response:
-        return html(page)
+    async def dashboard_page(request: Request) -> Response:
+        return html(request, page)
 
-    async def settings_html(_: Request) -> Response:
-        return html(settings_page)
+    async def settings_html(request: Request) -> Response:
+        return html(request, settings_page)
 
-    async def doctor_html(_: Request) -> Response:
-        return html(doctor_page)
+    async def doctor_html(request: Request) -> Response:
+        return html(request, doctor_page)
 
     async def json_body(request: Request) -> dict:
         try:

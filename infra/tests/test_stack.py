@@ -159,8 +159,14 @@ def test_destroy_mode():
     synth(retain_data=False).has_resource("AWS::DynamoDB::GlobalTable", {"DeletionPolicy": "Delete"})
 
 
+def _clients(template) -> dict:
+    """App clients by their CDK name (McpClient, AlexaClient, DashboardClient)."""
+    found = template.find_resources("AWS::Cognito::UserPoolClient")
+    return {next(n for n in ("McpClient", "AlexaClient", "DashboardClient") if n in k): (k, v["Properties"]) for k, v in found.items()}
+
+
 def test_alexa_client_only_with_vendor_id(template):
-    assert len(template.find_resources("AWS::Cognito::UserPoolClient")) == 1
+    assert set(_clients(template)) == {"McpClient", "DashboardClient"}
 
     linked = synth(alexa_vendor_id="M3IHEJ1OZMSGZ3")
     clients = linked.find_resources("AWS::Cognito::UserPoolClient")
@@ -169,9 +175,40 @@ def test_alexa_client_only_with_vendor_id(template):
     assert "https://pitangui.amazon.com/api/skill/link/M3IHEJ1OZMSGZ3" in callbacks
     assert len(callbacks) == 4  # every regional Alexa redirect URL
     assert alexa["AllowedOAuthFlows"] == ["code"]
-    # The app accepts tokens from both clients
+    # The app accepts tokens from both clients, and not the dashboard's
     audience = str(_env(linked)["OAUTH_AUDIENCE"])
-    assert all(f"'Ref': '{logical_id}'" in audience for logical_id in clients)
+    named = _clients(linked)
+    assert all(f"'Ref': '{named[n][0]}'" in audience for n in ("McpClient", "AlexaClient"))
+    assert named["DashboardClient"][0] not in audience
+    assert "email" in alexa["AllowedOAuthScopes"]  # a Google login's email is checked before it may link
+
+
+def test_dashboard_sign_in_client(template):
+    logical_id, client = _clients(template)["DashboardClient"]
+    assert client["GenerateSecret"] is False and client["AllowedOAuthFlows"] == ["code"]
+    assert "https://abc.us-east-1.awsapprunner.com/auth/callback" in client["CallbackURLs"]
+    assert "https://abc.us-east-1.awsapprunner.com/auth/signed-out" in client["LogoutURLs"]
+    assert set(client["AllowedOAuthScopes"]) == {"openid", "email", "profile"}
+    assert client["SupportedIdentityProviders"] == ["COGNITO"]
+    assert logical_id in str(_env(template)["LOGIN_CLIENT_ID"])
+    assert not template.find_resources("AWS::Cognito::UserPoolIdentityProvider")
+    assert "ALEXA_ACCOUNT_LINKING" not in _env(template) and "CAREGIVER_LOGINS" not in _env(template)
+
+
+def test_google_login_reads_its_secret_at_deploy():
+    t = synth(public_url="https://abc.us-east-1.awsapprunner.com", alexa_vendor_id="M3IHEJ1OZMSGZ3",
+              google_client_id="123-abc.apps.googleusercontent.com", caregiver_logins="priya@example.com",
+              alexa_account_linking=True)
+    google = next(iter(t.find_resources("AWS::Cognito::UserPoolIdentityProvider").values()))["Properties"]
+    assert google["ProviderName"] == "Google" and google["ProviderDetails"]["client_id"] == "123-abc.apps.googleusercontent.com"
+    assert "resolve:secretsmanager:kinvesper/google-client-secret" in str(google["ProviderDetails"]["client_secret"])
+    assert google["AttributeMapping"]["email_verified"] == "email_verified"
+    named = _clients(t)
+    assert "Google" in str(named["DashboardClient"][1]["SupportedIdentityProviders"])
+    assert "Google" in str(named["AlexaClient"][1]["SupportedIdentityProviders"])
+    assert named["McpClient"][1]["SupportedIdentityProviders"] == ["COGNITO"]
+    env = _env(t)
+    assert env["CAREGIVER_LOGINS"] == "priya@example.com" and env["ALEXA_ACCOUNT_LINKING"] == "required"
 
 
 def test_skill_bridge_only_with_skill_id(template):

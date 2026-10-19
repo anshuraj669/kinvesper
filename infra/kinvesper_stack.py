@@ -25,6 +25,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCOPE = "kinvesper/mcp"
 # Alexa's account-linking redirect hosts (North America, Europe, Far East, and alexa.amazon.com)
 ALEXA_LINK_HOSTS = ("pitangui.amazon.com", "layla.amazon.com", "alexa.amazon.co.jp", "alexa.amazon.com")
+# "Continue with Google" on the Cognito login page: the OAuth client secret Google gives you, stored by
+# scripts/set_google_login.sh before deploying with -c googleClientId=... (read at deploy, never in the template).
+GOOGLE_SECRET = "kinvesper/google-client-secret"
 
 
 class KinvesperStack(cdk.Stack):
@@ -45,6 +48,9 @@ class KinvesperStack(cdk.Stack):
         alexa_vendor_id: str = "",
         alexa_skill_id: str = "",
         voice_call_from: str = "",
+        google_client_id: str = "",
+        caregiver_logins: str = "",
+        alexa_account_linking: bool = False,
         retain_data: bool = True,
         **kwargs,
     ) -> None:
@@ -77,6 +83,19 @@ class KinvesperStack(cdk.Stack):
             account_recovery=cognito.AccountRecovery.EMAIL_ONLY,
             removal_policy=removal,
         )
+        providers = [cognito.UserPoolClientIdentityProvider.COGNITO]
+        google = None
+        if google_client_id:
+            google = cognito.UserPoolIdentityProviderGoogle(
+                self, "Google", user_pool=users, client_id=google_client_id,
+                client_secret_value=cdk.SecretValue.secrets_manager(GOOGLE_SECRET),
+                scopes=["openid", "email", "profile"],
+                attribute_mapping=cognito.AttributeMapping(
+                    email=cognito.ProviderAttribute.GOOGLE_EMAIL,
+                    email_verified=cognito.ProviderAttribute.GOOGLE_EMAIL_VERIFIED,
+                    fullname=cognito.ProviderAttribute.GOOGLE_NAME),
+            )
+            providers.append(cognito.UserPoolClientIdentityProvider.GOOGLE)
         mcp_scope = cognito.ResourceServerScope(scope_name="mcp", scope_description="Use the Kinvesper MCP tools")
         resource_server = users.add_resource_server(
             "Api", identifier="kinvesper", scopes=[mcp_scope], user_pool_resource_server_name="Kinvesper MCP")
@@ -101,14 +120,34 @@ class KinvesperStack(cdk.Stack):
                 generate_secret=True,
                 o_auth=cognito.OAuthSettings(
                     flows=cognito.OAuthFlows(authorization_code_grant=True),
-                    scopes=[cognito.OAuthScope.resource_server(resource_server, mcp_scope), cognito.OAuthScope.OPENID],
+                    # email: a Google login may link only if it's one of the family's emails (userInfo tells)
+                    scopes=[cognito.OAuthScope.resource_server(resource_server, mcp_scope), cognito.OAuthScope.OPENID,
+                            cognito.OAuthScope.EMAIL],
                     callback_urls=[f"https://{host}/api/skill/link/{alexa_vendor_id}" for host in ALEXA_LINK_HOSTS],
                 ),
-                supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
+                supported_identity_providers=providers,
                 prevent_user_existence_errors=True,
                 refresh_token_validity=cdk.Duration.days(365),  # don't make an older person relink every month
             )
             clients.append(alexa_client)
+        # Caregiver sign-in on the dashboard: a public client (PKCE) whose tokens can't reach /mcp.
+        site = [public_url.rstrip("/")] if public_url else []
+        login_client = users.add_client(
+            "DashboardClient",
+            generate_secret=False,
+            o_auth=cognito.OAuthSettings(
+                flows=cognito.OAuthFlows(authorization_code_grant=True),
+                scopes=[cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
+                callback_urls=[f"{u}/auth/callback" for u in [*site, "http://localhost:8000"]],
+                logout_urls=[f"{u}/auth/signed-out" for u in [*site, "http://localhost:8000"]],
+            ),
+            supported_identity_providers=providers,
+            prevent_user_existence_errors=True,
+            id_token_validity=cdk.Duration.hours(1),
+        )
+        if google:
+            for c in [login_client, *clients[1:]]:
+                c.node.add_dependency(google)
         domain = users.add_domain("Login", cognito_domain=cognito.CognitoDomainOptions(
             domain_prefix=f"kinvesper-{cdk.Aws.ACCOUNT_ID}"))
         issuer = f"https://cognito-idp.{self.region}.amazonaws.com/{users.user_pool_id}"
@@ -192,7 +231,12 @@ class KinvesperStack(cdk.Stack):
             "OAUTH_SCOPES": SCOPE,
             "SCHEDULER_INTERVAL_S": "0",  # App Runner idles the CPU between requests: EventBridge drives the checks
             "STT_PROVIDER": "transcribe",  # Whisper takes ~8 s per request on App Runner's CPU; Transcribe ~1 s
+            "LOGIN_CLIENT_ID": login_client.user_pool_client_id,  # caregiver sign-in on the dashboard
         }
+        if caregiver_logins:
+            env["CAREGIVER_LOGINS"] = caregiver_logins  # more emails that may sign in with Google
+        if alexa_account_linking:
+            env["ALEXA_ACCOUNT_LINKING"] = "required"  # the skill answers only once a family login is linked
         if public_url:
             env["PUBLIC_URL"] = public_url.rstrip("/")
         if alexa_skill_id:
@@ -286,6 +330,10 @@ class KinvesperStack(cdk.Stack):
             out("AlexaClientId", alexa_client.user_pool_client_id,
                 "Alexa+ account linking client; its secret is in the Cognito console (or describe-user-pool-client)")
         out("OAuthLogin", domain.base_url(), "Cognito hosted login")
+        out("DashboardLoginClientId", login_client.user_pool_client_id, "Cognito client for caregiver sign-in")
+        out("SignIn", f"{url}/auth/login", "Caregiver sign-in (logins: make login EMAIL=...)")
+        out("GoogleRedirectUri", f"{domain.base_url()}/oauth2/idpresponse",
+            "Paste into Google Cloud Console: OAuth client > Authorized redirect URIs")
         out("UserPoolId", users.user_pool_id, "Create caregiver logins here")
         out("TableName", table.table_name, "DynamoDB table")
         out("AlertsTopic", alerts.topic_arn, "Caregiver alerts topic (SMS/email)")

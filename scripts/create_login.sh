@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create the login a person signs in with when linking Kinvesper in the Alexa app.
+# Create a family login: for signing in to the caregiver dashboard and linking Kinvesper in the Alexa app.
 #
 #   ./scripts/create_login.sh margaret@example.com      # asks for a password (12+ characters)
 #
@@ -38,4 +38,4 @@ printf %s "$password" | python3 -c 'import json, sys; print(json.dumps({"UserPoo
   "Username": sys.argv[2], "Password": sys.stdin.read(), "Permanent": True}))' "$pool" "$email" >"$request"
 aws cognito-idp admin-set-user-password --cli-input-json "file://$request"
 
-echo "Done. Sign in as $email when the Alexa app asks you to link Kinvesper."
+echo "Done. Sign in as $email on the dashboard, or when the Alexa app asks you to link Kinvesper."

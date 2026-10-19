@@ -268,6 +268,33 @@ Every alert carries a de-duplication key, so a missed dose texts the caregiver o
 often the checks run. `uv run kinvesper --check` runs them once, for cron or EventBridge.
 With OAuth on, the dashboard needs `DASHBOARD_KEY` (`/dashboard?key=...`).
 
+## Signing in
+
+With OAuth on (deployed), caregivers **sign in** to the dashboard through Amazon Cognito's hosted
+login page instead of passing around a `?key=` link (which keeps working for EventBridge and
+bookmarks). Logins are made with `make login EMAIL=...`: nobody can sign themselves up. Once a Google
+OAuth client is set up, the same page offers **Continue with Google**. Anyone has a Google account,
+so a Google login gets in only when its verified email is the caregiver's or the backup's in
+Settings, or listed in `CAREGIVER_LOGINS`; take an email out of Settings and its session stops
+working.
+
+The same logins **link the Alexa skill** (account linking, Cognito as the OAuth server) and the
+Alexa+ add-on. With `-c alexaAccountLinking=true` the skill answers only once a family login is
+linked; until then it says so and puts a **Link account** card in the Alexa app. The Google rule
+applies there too, and on `/mcp`: Cognito's userInfo endpoint gives the email behind the token.
+
+Setting up Google (free):
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), **Create
+   credentials → OAuth client ID → Web application**. Authorized redirect URI: the stack output
+   `GoogleRedirectUri` (`https://kinvesper-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse`).
+2. `make google-login` stores the client secret in Secrets Manager.
+3. Redeploy with `-c googleClientId=<client ID>` (and `-c caregiverLogins=a@x.com,b@y.com` for more family).
+
+Details are in [signin.py](src/kinvesper/signin.py): authorization code with PKCE, the ID token checked
+against Cognito's keys, a signed HttpOnly SameSite=Lax session cookie (7 days), and changes accepted
+only with this site's `Origin`.
+
 ## On Alexa
 
 The classic skill in `alexa/skill` reaches Kinvesper from any Echo today (the Alexa+ add-on in
@@ -390,6 +417,7 @@ Details and the AWS services per phase are in [PHASES.md](PHASES.md).
   family messages, companionship and memories, Echo Show screen, Telegram alerts bot
 - [x] **Phase 8:** voice notes and photos from Telegram on the Echo, her answers back in her own
   voice, wellbeing trends, the family safe word, impact numbers
+- [x] **Phase 9:** caregiver sign-in (Cognito, optional Google) and Alexa account linking
 - [ ] **Next:** multi-family accounts, Alexa+ add-on (waiting on the allowlist)
 
 ## License
