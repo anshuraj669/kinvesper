@@ -77,7 +77,7 @@ class DoseLog(BaseModel):
 AlertLevel = Literal["info", "warning", "urgent"]
 AlertKind = Literal[
     "missed_dose", "scam", "inactivity", "emergency", "refill", "caregiver_message", "checkin", "low_stock", "test", "report",
-    "reminder", "interaction", "pattern", "no_checkin",
+    "reminder", "interaction", "pattern", "no_checkin", "wish",
 ]
 
 
@@ -148,6 +148,19 @@ class Memory(BaseModel):
     at: str
     topic: str = ""
     text: str
+
+
+class WishItem(BaseModel):
+    """Something the person would like, kept for the family and, on an Echo, put on their Amazon Wish List."""
+
+    id: str = Field(default_factory=lambda: new_id("wish"))
+    at: str
+    item: str  # what they asked for, in their words
+    title: str = ""  # the product found on Amazon
+    asin: str = ""  # its Amazon product ID, when one was found
+    url: str  # the product's Amazon page, or an Amazon search for the item
+    status: Literal["saved", "on_amazon", "not_on_amazon"] = "saved"  # on_amazon: Alexa put it on their Wish List
+    sent_to_alexa: bool = False
 
 
 class CheckIn(BaseModel):
@@ -308,6 +321,13 @@ class ScanResult(BaseModel):
 
 class MessagesResult(BaseModel):
     messages: list[FamilyMessage] = Field(default_factory=list)
+    message: str
+
+
+class WishResult(BaseModel):
+    saved: bool
+    item: WishItem | None = None
+    family_told: bool = False
     message: str
 
 

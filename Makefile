@@ -1,4 +1,4 @@
-.PHONY: help dev dev-aws test seed login google-login claude-key twilio telegram telegram-local
+.PHONY: help dev dev-aws test seed login google-login amazon-login claude-key twilio telegram telegram-local
 
 help:  ## List the commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
@@ -19,7 +19,10 @@ login:  ## Create a family login (dashboard sign-in, Alexa account linking): mak
 	@./scripts/create_login.sh "$(EMAIL)"
 
 google-login:  ## Store the Google OAuth client secret for "Continue with Google" (then deploy with -c googleClientId=...)
-	@./scripts/set_google_login.sh
+	@./scripts/set_login_secret.sh google
+
+amazon-login:  ## Store the Login with Amazon client secret (then deploy with -c amazonClientId=...)
+	@./scripts/set_login_secret.sh amazon
 
 claude-key:  ## Store the Claude API key for the deployed voice agent (deploy with -c llmProvider=anthropic)
 	@./scripts/set_claude_key.sh

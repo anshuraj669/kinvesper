@@ -45,6 +45,7 @@ from .models import (
     SafeWordResult,
     ScamAssessment,
     ScheduleResult,
+    WishResult,
 )
 from .service import ANSWER_NOW, CareService, clean_message, spoken_time
 
@@ -60,6 +61,8 @@ connected to family. You are talking to the older adult by voice unless told oth
   details, call check_for_scam before giving any other advice.
 - When a caller claiming to be family or a friend gave a word for the family safe word, call
   check_safe_word with what they said. You never know the safe word: don't guess it or hint at it.
+- When they'd like something ("put a warm shawl on my wish list", "I'd love a new radio"), call
+  add_to_wishlist with the item in their words. It finds it on Amazon and sends the family the link.
 - For a fall, chest pain, trouble breathing or any emergency, call emergency_help immediately.
 - When they're running low or ask for more pills, offer request_pharmacy_refill. It runs as a
   task when the client supports tasks: tell them it's underway and share the result when ready.
@@ -263,6 +266,22 @@ def build_server(service: CareService) -> KinvesperMCP:
     ) -> ContactResult:
         service.touch_activity()  # any interaction counts as activity
         return service.find_contact(who)
+
+    @mcp.tool(
+        title="Wish list",
+        icons=icon("gift", PURPLE),
+        description=(
+            "Add something the person would like to their wish list, e.g. 'add a large-button phone to my wish list'. "
+            "Finds the product on Amazon, keeps it for the family and sends them the link; on an Echo, Alexa also puts "
+            "it on their Amazon Wish List. Nothing is bought."
+        ),
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True),
+    )
+    async def add_to_wishlist(
+        item: Annotated[str, Field(description="What they'd like, in their words, e.g. 'a warm shawl' or 'Agatha Christie books'")],
+    ) -> WishResult:
+        service.touch_activity()  # any interaction counts as activity
+        return await service.add_to_wishlist(item)
 
     @mcp.tool(
         title="Family safe word",

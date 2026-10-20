@@ -224,3 +224,20 @@ async def test_alexa_asks_for_linking_until_a_family_login_is_linked(bridge):
     # Alexa's "session ended" needs no linking check
     assert await bridge.handle({"session": {"sessionId": "s-link"}, "request": {"type": "SessionEndedRequest"}}) == \
         {"version": "1.0", "response": {}}
+
+
+AMAZON = {"cognito:username": "loginwithamazon_amzn1.account.X", "identities": [{"providerName": "LoginWithAmazon"}]}
+
+
+def test_login_with_amazon_needs_no_email_verified_claim(client, cognito, service):
+    service.store.save("profile", service.profile().model_copy(update={"caregiver_email": "priya@example.com"}), id="main")
+    token = id_token(**AMAZON, sub="amzn-1")
+    claims = jwt.decode(token, options={"verify_signature": False})
+    del claims["email_verified"]
+    cognito["id_token"] = jwt.encode(claims, PRIVATE, algorithm="RS256")
+    _, back = sign_in(client, cognito)
+    assert back.status_code == 302 and client.get("/api/dashboard").status_code == 200
+    assert not signin.allowed({**AMAZON, "email": "stranger@example.com"}, {"priya@example.com"})
+    assert signin.provider({"username": "loginwithamazon_amzn1"}) == "loginwithamazon"
+    r = client.get("/auth/login?provider=LoginWithAmazon")
+    assert parse_qs(urlsplit(r.headers["location"]).query)["identity_provider"] == ["LoginWithAmazon"]

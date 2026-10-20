@@ -22,6 +22,8 @@ TEXT = {
         "not_caught": "Sorry, I didn't catch that. Could you say it another way?",
         "cant_do": "Sorry, I can't do that yet.",
         "unreachable": "Sorry, I can't reach Kinvesper right now. Please try again in a minute.",
+        "wish_added": "Done, it's on your Amazon Wish List too. Anything else?",
+        "wish_not_added": "I couldn't put it on your Amazon Wish List, but it's saved, and your family has the link. Anything else?",
         "link_account": "Kinvesper needs your family's login first. I've put a card in the Alexa app: open it, "
                         "tap Link account, and sign in with the Kinvesper login.",
         "reminders_set": "Done. Every day at {times}, I'll remind you which medicines to take.",
@@ -58,6 +60,8 @@ TEXT = {
         "not_caught": "माफ़ कीजिए, मैं समझ नहीं पाया। क्या आप दूसरे तरीके से कह सकते हैं?",
         "cant_do": "माफ़ कीजिए, मैं अभी यह नहीं कर सकता।",
         "unreachable": "माफ़ कीजिए, अभी Kinvesper से जुड़ नहीं पा रहा। एक मिनट बाद फिर कोशिश कीजिए।",
+        "wish_added": "हो गया, यह आपकी Amazon Wish List में भी है। और कुछ?",
+        "wish_not_added": "मैं इसे आपकी Amazon Wish List में नहीं डाल पाया, पर यह सेव है और आपके परिवार के पास इसका लिंक है। और कुछ?",
         "link_account": "पहले Kinvesper को आपके परिवार का लॉगिन चाहिए। मैंने Alexa ऐप में एक कार्ड भेजा है: उसे खोलिए, "
                         "Link account दबाइए, और Kinvesper लॉगिन से साइन इन कीजिए।",
         "reminders_set": "हो गया। मैं रोज़ {times} आपको याद दिलाऊँगा कि कौन सी दवाई लेनी है।",

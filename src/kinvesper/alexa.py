@@ -150,6 +150,17 @@ def ask_reminders_permission(purpose: str = "pills") -> dict:
     }]}}
 
 
+def add_to_wish_list(text: str, asin: str, token: str) -> dict:
+    """Alexa Shopping: Alexa puts the product on the Amazon Wish List of the account the Echo is signed in to,
+    then sends a SessionResumedRequest with the result. A developer preview: Amazon must turn it on for the skill."""
+    reply = speak(text, end=False, reprompt=None)
+    reply["response"].pop("shouldEndSession")  # the connection hands the session to Alexa and back
+    reply["response"]["directives"] = [{
+        "type": "Connections.StartConnection", "uri": "connection://AMAZON.AddToList/1",
+        "input": {"products": [{"asin": asin}], "listType": "WISHLIST"}, "token": token}]
+    return reply
+
+
 def link_account(locale: str) -> dict:
     """Ask for account linking: Alexa shows a Link account card in the app."""
     reply = speak(t(locale, "link_account"), end=True)
@@ -204,7 +215,8 @@ class AlexaBridge:
         response = reply.get("response")
         photo = self._photos.pop((body.get("session") or {}).get("sessionId", ""), None)
         if (response is not None and self.service and apl.supports_screen(body)
-                and not any(d.get("type") == "Connections.SendRequest" for d in response.get("directives", []))):
+                and not any(d.get("type") in ("Connections.SendRequest", "Connections.StartConnection")
+                            for d in response.get("directives", []))):
             try:
                 said = (response.get("outputSpeech") or {}).get("text", "")
                 response.setdefault("directives", []).append(
@@ -248,6 +260,15 @@ class AlexaBridge:
             if accepted:
                 return await self._set_reminders(system, locale, ask=False)
             return say("reminders_declined")
+        if kind == "SessionResumedRequest" and self.service:  # back from Alexa Shopping
+            cause = request.get("cause") or {}
+            if str(cause.get("token", "")).startswith("wish:"):
+                added = str((cause.get("status") or {}).get("code")) == "200" and not (cause.get("result") or {}).get("code")
+                if not added:
+                    log.info("Alexa Shopping didn't add the wish: %s %s", cause.get("status"), cause.get("result"))
+                self.service.wish_on_amazon(cause["token"][5:], added)
+                return say("wish_added" if added else "wish_not_added")
+            return say("reprompt")
 
         session = await self._session(alexa_id)
         session.language = lang(locale)  # Claude answers in the language the skill is used in
@@ -364,6 +385,9 @@ class AlexaBridge:
                 return ask_reminders_permission("oneoff")  # saved in Kinvesper; Alexa asks to let the Echo ring
         if result.awaiting_confirmation:
             return speak(reply, end=False, reprompt=reply)
+        if (self.service and any(c.name == "add_to_wishlist" and not c.is_error for c in result.tool_calls)
+                and (wish := self.service.wish_for_alexa())):
+            return add_to_wish_list(reply, wish.asin, f"wish:{wish.id}")
         if one_shot:  # "Alexa, ask kin vesper ...": answer and finish, like any one-shot request
             await self._end(alexa_id)
             return speak(reply, end=True)

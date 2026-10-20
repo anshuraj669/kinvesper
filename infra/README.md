@@ -81,8 +81,9 @@ key <ServiceTokenSecret>     # → bearer token for MCP clients that skip OAuth
   the client `OAuthClientId` (in mcp-voice-simulator: `MCP_CLIENT_ID`) and add its redirect URL with
   `-c callbackUrls=...`. Or use the service token (`MCP_BEARER_TOKEN`).
 - **Caregiver logins** (self sign-up is off): `make login EMAIL=priya@example.com`, then sign in at
-  `<SignIn>`. For "Continue with Google": `make google-login`, then redeploy with
-  `-c googleClientId=...` (see "Signing in" in the main README).
+  `<SignIn>`. For "Continue with Google" or "Login with Amazon": `make google-login` /
+  `make amazon-login`, then redeploy with `-c googleClientId=...` / `-c amazonClientId=...` (see
+  "Signing in" in the main README).
 - **Reset the demo data:**
   `STORE=dynamodb DYNAMODB_TABLE=<TableName> AWS_REGION=us-east-1 uv run kinvesper --seed`
 - **Logs:** CloudWatch → Log groups → `/aws/apprunner/kinvesper/...`

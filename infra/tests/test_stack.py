@@ -224,3 +224,12 @@ def test_phone_calls_only_with_a_calling_number(template):
 def test_twilio_credentials_come_from_secrets_manager(template):
     secrets = _env(template, "RuntimeEnvironmentSecrets")
     assert "TWILIO_CREDENTIALS" in secrets and "TWILIO_CREDENTIALS" not in _env(template)
+
+
+def test_login_with_amazon_reads_its_secret_at_deploy():
+    t = synth(public_url="https://abc.us-east-1.awsapprunner.com", amazon_client_id="amzn1.application-oa2-client.abc")
+    idp = next(iter(t.find_resources("AWS::Cognito::UserPoolIdentityProvider").values()))["Properties"]
+    assert idp["ProviderName"] == "LoginWithAmazon" and idp["ProviderDetails"]["client_id"] == "amzn1.application-oa2-client.abc"
+    assert "resolve:secretsmanager:kinvesper/amazon-client-secret" in str(idp["ProviderDetails"]["client_secret"])
+    assert idp["AttributeMapping"]["email"] == "email"
+    assert "LoginWithAmazon" in str(_clients(t)["DashboardClient"][1]["SupportedIdentityProviders"])

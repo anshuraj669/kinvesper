@@ -272,28 +272,48 @@ With OAuth on, the dashboard needs `DASHBOARD_KEY` (`/dashboard?key=...`).
 
 With OAuth on (deployed), caregivers **sign in** to the dashboard through Amazon Cognito's hosted
 login page instead of passing around a `?key=` link (which keeps working for EventBridge and
-bookmarks). Logins are made with `make login EMAIL=...`: nobody can sign themselves up. Once a Google
-OAuth client is set up, the same page offers **Continue with Google**. Anyone has a Google account,
-so a Google login gets in only when its verified email is the caregiver's or the backup's in
-Settings, or listed in `CAREGIVER_LOGINS`; take an email out of Settings and its session stops
-working.
+bookmarks). Logins are made with `make login EMAIL=...`: nobody can sign themselves up. Once their
+clients are set up, the same page offers **Continue with Google** and **Login with Amazon**. Anyone
+has a Google or Amazon account, so such a login gets in only when its verified email is the
+caregiver's or the backup's in Settings, or listed in `CAREGIVER_LOGINS`; take an email out of
+Settings and its session stops working. (Amazon sends no `email_verified`; it only lets an account
+in once its email is confirmed, so Kinvesper treats its email as verified.)
 
 The same logins **link the Alexa skill** (account linking, Cognito as the OAuth server) and the
 Alexa+ add-on. With `-c alexaAccountLinking=true` the skill answers only once a family login is
 linked; until then it says so and puts a **Link account** card in the Alexa app. The Google rule
 applies there too, and on `/mcp`: Cognito's userInfo endpoint gives the email behind the token.
 
-Setting up Google (free):
+Both are free. The redirect URL for each is the stack output `GoogleRedirectUri`
+(`https://kinvesper-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse`).
 
-1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), **Create
-   credentials → OAuth client ID → Web application**. Authorized redirect URI: the stack output
-   `GoogleRedirectUri` (`https://kinvesper-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse`).
-2. `make google-login` stores the client secret in Secrets Manager.
-3. Redeploy with `-c googleClientId=<client ID>` (and `-c caregiverLogins=a@x.com,b@y.com` for more family).
+- **Google:** in [Google Cloud Console](https://console.cloud.google.com/apis/credentials), **Create
+  credentials → OAuth client ID → Web application**, with that URL as an authorized redirect URI.
+  Then `make google-login` (stores the secret) and redeploy with `-c googleClientId=<client ID>`.
+- **Amazon:** in the [Login with Amazon console](https://developer.amazon.com/loginwithamazon/console/site/lwa/overview.html),
+  create a security profile; under **Web Settings** set Allowed Origins to
+  `https://kinvesper-<account>.auth.<region>.amazoncognito.com` and Allowed Return URLs to that URL.
+  Then `make amazon-login` and redeploy with `-c amazonClientId=<client ID>`.
+- More family: `-c caregiverLogins=a@x.com,b@y.com`.
 
 Details are in [signin.py](src/kinvesper/signin.py): authorization code with PKCE, the ID token checked
 against Cognito's keys, a signed HttpOnly SameSite=Lax session cookie (7 days), and changes accepted
 only with this site's `Origin`.
+
+## Wish list
+
+"Put a warm shawl on my wish list" calls `add_to_wishlist`. Claude searches the family's Amazon (from
+the care time zone: amazon.in for India, `AMAZON_SITE` to change it) for a fitting product, and the
+product's ID must come from a page the search returned, never from the model's memory. The item is
+kept on the dashboard's **Wish list** card with its Amazon link, and the family gets it on Telegram,
+text and email. Nothing is bought.
+
+On an Echo, Alexa also puts it on the **Amazon Wish List** of the account the Echo is signed in to,
+through [Alexa Shopping Actions](https://developer.amazon.com/docs/alexa/alexa-shopping/alexa-shopping-actions-for-alexa-skills-api-reference.html)
+(`connection://AMAZON.AddToList/1`). Amazon has no Wish List API outside Alexa, and logging in with
+Amazon doesn't give access to it. That Alexa action is a developer preview Amazon turns on per skill
+(through an Amazon business representative); until it's on, Alexa says it couldn't, and the item
+stays saved with the family's link.
 
 ## On Alexa
 
@@ -417,7 +437,8 @@ Details and the AWS services per phase are in [PHASES.md](PHASES.md).
   family messages, companionship and memories, Echo Show screen, Telegram alerts bot
 - [x] **Phase 8:** voice notes and photos from Telegram on the Echo, her answers back in her own
   voice, wellbeing trends, the family safe word, impact numbers
-- [x] **Phase 9:** caregiver sign-in (Cognito, optional Google) and Alexa account linking
+- [x] **Phase 9:** caregiver sign-in (Cognito, optional Google and Login with Amazon), Alexa account
+  linking, the wish list (Amazon search, Alexa Shopping's Wish List)
 - [ ] **Next:** multi-family accounts, Alexa+ add-on (waiting on the allowlist)
 
 ## License

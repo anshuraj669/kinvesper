@@ -7,10 +7,12 @@
     GET /auth/me                      who is signed in ({"email", "name"}), 401 when nobody is
 
 Cognito is the identity provider for everything: its own logins (made with `make login`, no self
-sign-up) and, once its client ID and secret are set up, "Continue with Google" on the same page.
-Anyone with a Google account can get that far, so a Google (or other federated) login is let in only
-when its verified email belongs to the family: the caregiver's or backup's email in Settings, or one
-listed in CAREGIVER_LOGINS. A login made in the user pool itself is always let in.
+sign-up) and, once their client IDs and secrets are set up, "Continue with Google" and "Login with
+Amazon" on the same page. Anyone has a Google or Amazon account, so such a login is let in only when
+its verified email belongs to the family: the caregiver's or backup's email in Settings, or one
+listed in CAREGIVER_LOGINS. A login made in the user pool itself is always let in. (Amazon sends no
+email_verified claim; it confirms an account's email before the account can be used, so its email
+counts as verified.)
 
 The same rule decides which accounts may link the Alexa skill and Alexa+ (see auth.JwtTokenVerifier):
 their access tokens carry no email, so it comes from Cognito's userInfo endpoint.
@@ -50,6 +52,7 @@ FLOW_S = 10 * 60
 USERINFO_CACHE_S = 600
 # Cognito names a federated user "<provider>_<id>" and puts them in the group "<pool id>_<provider>".
 PROVIDERS = ("google", "loginwithamazon", "signinwithapple", "facebook")
+VERIFIED_EMAIL = {"loginwithamazon"}  # sends no email_verified, but only verified emails sign in
 
 _discovery: dict = {}
 _userinfo: dict[str, tuple[float, dict | None]] = {}
@@ -112,10 +115,19 @@ def federated(claims: dict) -> bool:
     return name.startswith(tuple(f"{p}_" for p in PROVIDERS)) or any(g.endswith(tuple(f"_{p}" for p in PROVIDERS)) for g in groups)
 
 
+def provider(claims: dict) -> str:
+    """The outside identity provider of a federated login, lowercased ("google", "loginwithamazon")."""
+    for identity in claims.get("identities") or []:
+        if isinstance(identity, dict) and identity.get("providerName"):
+            return str(identity["providerName"]).lower()
+    name = str(claims.get("cognito:username") or claims.get("username") or "").lower()
+    return next((p for p in PROVIDERS if name.startswith(f"{p}_")), "")
+
+
 def allowed(claims: dict, emails: set[str]) -> bool:
     if not federated(claims):
         return True  # made with `make login`: nobody can sign themselves up
-    verified = claims.get("email_verified") in (True, "true", "True")
+    verified = claims.get("email_verified") in (True, "true", "True") or provider(claims) in VERIFIED_EMAIL
     return verified and str(claims.get("email") or "").lower() in emails
 
 
@@ -158,7 +170,8 @@ def token_check(emails: Callable[[], set[str]]) -> Callable[[str, dict], Awaitab
         if not federated(claims):
             return True
         info = await userinfo(token)
-        ok = bool(info) and allowed({**info, "identities": info.get("identities") or [True]}, emails())
+        ok = bool(info) and allowed({**info, "identities": info.get("identities") or [{"providerName": provider(claims) or "?"}]},
+                                    emails())
         if not ok:
             log.info("Refused a %s login that isn't one of the family's emails", claims.get("username", "federated"))
         return ok
@@ -253,8 +266,8 @@ def signin_routes(emails: Callable[[], set[str]]) -> list[Route]:
         query = {"response_type": "code", "client_id": settings.login_client_id, "redirect_uri": _redirect_uri(),
                  "scope": "openid email profile", "state": state, "code_challenge": challenge,
                  "code_challenge_method": "S256"}
-        if provider := request.query_params.get("provider"):  # straight to Google: /auth/login?provider=Google
-            query["identity_provider"] = provider
+        if idp := request.query_params.get("provider"):  # straight there: ?provider=Google or ?provider=LoginWithAmazon
+            query["identity_provider"] = idp
         r = RedirectResponse(f"{authorize}?{urlencode(query)}", status_code=302)
         flow = seal({"state": state, "verifier": verifier, "next": _next(request.query_params.get("next")),
                      "exp": int(time.time()) + FLOW_S})

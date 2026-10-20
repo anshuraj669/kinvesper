@@ -90,6 +90,8 @@ class Settings:
     caregiver_logins: str = field(default_factory=lambda: _env("CAREGIVER_LOGINS"))
     # "required": the Alexa skill answers only once a family login is linked in the Alexa app.
     alexa_account_linking: str = field(default_factory=lambda: _env("ALEXA_ACCOUNT_LINKING").lower())
+    # The Amazon site wish list items are found on (amazon.in, amazon.com...). Empty = from CARE_TZ.
+    amazon_site: str = field(default_factory=lambda: _env("AMAZON_SITE"))
     # Skill ID of the classic Alexa skill bridge (amzn1.ask.skill...); empty = /alexa is off.
     alexa_skill_id: str = field(default_factory=lambda: _env("ALEXA_SKILL_ID"))
 

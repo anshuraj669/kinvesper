@@ -151,6 +151,12 @@ and with the "trusted certificate" option Alexa fails the TLS check and says "un
    - Save, then redeploy the stack with `-c alexaAccountLinking=true`. In the Alexa app: **Skills →
      Kinvesper → Link account**, and sign in with a login from `make login` (or Google).
 
+4. **Wish list on Amazon** (optional): "put a shawl on my wish list" hands the product to Alexa
+   Shopping (`Connections.StartConnection`, `AMAZON.AddToList`), which adds it to the Amazon Wish
+   List of the account the Echo uses. Amazon calls this a developer preview: ask your Amazon business
+   representative (or developer support) to enable it for the skill. Until then Alexa answers
+   "couldn't put it on your Amazon Wish List", and the item stays on the dashboard with its link.
+
 Or with the ASK CLI (`npm install -g ask-cli`, `ask configure`), which deploys all of it:
 
 ```bash

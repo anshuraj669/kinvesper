@@ -25,9 +25,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCOPE = "kinvesper/mcp"
 # Alexa's account-linking redirect hosts (North America, Europe, Far East, and alexa.amazon.com)
 ALEXA_LINK_HOSTS = ("pitangui.amazon.com", "layla.amazon.com", "alexa.amazon.co.jp", "alexa.amazon.com")
-# "Continue with Google" on the Cognito login page: the OAuth client secret Google gives you, stored by
-# scripts/set_google_login.sh before deploying with -c googleClientId=... (read at deploy, never in the template).
+# "Continue with Google" and "Login with Amazon" on the Cognito login page: the client secrets Google and
+# Amazon give you, stored by scripts/set_login_secret.sh before deploying with -c googleClientId=... /
+# -c amazonClientId=... (resolved by CloudFormation at deploy, never in the template).
 GOOGLE_SECRET = "kinvesper/google-client-secret"
+AMAZON_SECRET = "kinvesper/amazon-client-secret"
 
 
 class KinvesperStack(cdk.Stack):
@@ -49,6 +51,7 @@ class KinvesperStack(cdk.Stack):
         alexa_skill_id: str = "",
         voice_call_from: str = "",
         google_client_id: str = "",
+        amazon_client_id: str = "",
         caregiver_logins: str = "",
         alexa_account_linking: bool = False,
         retain_data: bool = True,
@@ -84,7 +87,7 @@ class KinvesperStack(cdk.Stack):
             removal_policy=removal,
         )
         providers = [cognito.UserPoolClientIdentityProvider.COGNITO]
-        google = None
+        outside: list[cognito.UserPoolIdentityProviderBase] = []
         if google_client_id:
             google = cognito.UserPoolIdentityProviderGoogle(
                 self, "Google", user_pool=users, client_id=google_client_id,
@@ -96,6 +99,18 @@ class KinvesperStack(cdk.Stack):
                     fullname=cognito.ProviderAttribute.GOOGLE_NAME),
             )
             providers.append(cognito.UserPoolClientIdentityProvider.GOOGLE)
+            outside.append(google)
+        if amazon_client_id:
+            amazon = cognito.UserPoolIdentityProviderAmazon(
+                self, "Amazon", user_pool=users, client_id=amazon_client_id,
+                # this construct takes a plain string: a {{resolve:secretsmanager:...}} reference, not the secret
+                client_secret=cdk.SecretValue.secrets_manager(AMAZON_SECRET).unsafe_unwrap(),
+                scopes=["profile"],  # name and email
+                attribute_mapping=cognito.AttributeMapping(
+                    email=cognito.ProviderAttribute.AMAZON_EMAIL, fullname=cognito.ProviderAttribute.AMAZON_NAME),
+            )
+            providers.append(cognito.UserPoolClientIdentityProvider.AMAZON)
+            outside.append(amazon)
         mcp_scope = cognito.ResourceServerScope(scope_name="mcp", scope_description="Use the Kinvesper MCP tools")
         resource_server = users.add_resource_server(
             "Api", identifier="kinvesper", scopes=[mcp_scope], user_pool_resource_server_name="Kinvesper MCP")
@@ -145,9 +160,9 @@ class KinvesperStack(cdk.Stack):
             prevent_user_existence_errors=True,
             id_token_validity=cdk.Duration.hours(1),
         )
-        if google:
+        for idp in outside:
             for c in [login_client, *clients[1:]]:
-                c.node.add_dependency(google)
+                c.node.add_dependency(idp)
         domain = users.add_domain("Login", cognito_domain=cognito.CognitoDomainOptions(
             domain_prefix=f"kinvesper-{cdk.Aws.ACCOUNT_ID}"))
         issuer = f"https://cognito-idp.{self.region}.amazonaws.com/{users.user_pool_id}"
@@ -333,7 +348,7 @@ class KinvesperStack(cdk.Stack):
         out("DashboardLoginClientId", login_client.user_pool_client_id, "Cognito client for caregiver sign-in")
         out("SignIn", f"{url}/auth/login", "Caregiver sign-in (logins: make login EMAIL=...)")
         out("GoogleRedirectUri", f"{domain.base_url()}/oauth2/idpresponse",
-            "Paste into Google Cloud Console: OAuth client > Authorized redirect URIs")
+            "Google Cloud Console: OAuth client > Authorized redirect URIs; Login with Amazon: Allowed Return URLs")
         out("UserPoolId", users.user_pool_id, "Create caregiver logins here")
         out("TableName", table.table_name, "DynamoDB table")
         out("AlertsTopic", alerts.topic_arn, "Caregiver alerts topic (SMS/email)")

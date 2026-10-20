@@ -13,7 +13,9 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from html import escape
+from urllib.parse import quote_plus
 
+import anthropic
 import anyio
 
 from . import (
@@ -61,6 +63,8 @@ from .models import (
     ScheduleResult,
     TelegramLink,
     TrustedContact,
+    WishItem,
+    WishResult,
 )
 from .store import Store
 
@@ -204,6 +208,18 @@ eyesight may be poor). One or two short, warm sentences about who and what is in
 the two children on a beach, all smiling." Don't guess names you can't know; say "a little boy" instead.
 Plain text."""
 TRENDS_CACHE_S = 120
+# Which Amazon the family shops on, from the care time zone (AMAZON_SITE overrides it).
+AMAZON_SITES = {"Asia/Kolkata": "amazon.in", "Asia/Calcutta": "amazon.in", "Europe/London": "amazon.co.uk",
+                "Europe/Berlin": "amazon.de", "Europe/Paris": "amazon.fr", "Asia/Tokyo": "amazon.co.jp",
+                "Australia/Sydney": "amazon.com.au", "America/Toronto": "amazon.ca"}
+ASIN = re.compile(r"/(?:dp|gp/product)/([A-Z0-9]{10})(?:[/?#]|$)")
+PRODUCT_SYSTEM = """You find one product on {site} for an older adult who asked for it by voice. Search for it; if the
+results are only search or category pages, search once more with a typical product name (e.g. "women's wool shawl").
+Pick the best match whose {site} product page (/dp/) you found, in stock and suited to them (well rated, not an
+accessory or a bundle unless asked), and reply with exactly one line:
+PRODUCT: <the product's name, short enough to say aloud> | URL: <its {site} product page, with /dp/ in it>
+If nothing on {site} fits, reply: PRODUCT: none"""
+WISH_SENT_S = 120  # the Echo turns a wish saved this recently into an Amazon Wish List request
 
 
 class SettingsError(ValueError):
@@ -1419,6 +1435,76 @@ class CareService:
         said = " Next: ".join(_heard_one(m, first=False) for m in unheard)
         return MessagesResult(messages=unheard, message=f"You have {len(unheard)} messages. First, {said}")
 
+    # ---------- wish list ----------
+
+    @staticmethod
+    def amazon_site() -> str:
+        return settings.amazon_site or AMAZON_SITES.get(getattr(settings.tz, "key", ""), "amazon.com")
+
+    async def _find_product(self, item: str, site: str) -> tuple[str, str] | None:
+        """(name, ASIN) of the product on Amazon, found by Claude's web search. The ASIN must come from a
+        page the search actually returned, never from the model's memory."""
+        if not llm.server_tools():
+            return None
+        try:
+            search = {**llm.server_tools()[0], "max_uses": 2, "allowed_domains": [site]}  # only that Amazon's pages
+            response = await llm.create_message(
+                system=PRODUCT_SYSTEM.format(site=site), tools=[search], max_tokens=1024,
+                messages=[{"role": "user", "content": f"Find on {site}: {item}"}])
+        except anthropic.APIError as e:
+            log.warning("Product search failed: %s", e)
+            return None
+        seen = set()
+        for block in response.content:
+            for found in getattr(block, "content", None) or []:
+                if url := getattr(found, "url", ""):
+                    seen.update(ASIN.findall(url + "/"))
+            for cite in getattr(block, "citations", None) or []:
+                seen.update(ASIN.findall(getattr(cite, "url", "") + "/"))
+        m = re.search(r"PRODUCT:\s*(.+?)\s*\|\s*URL:\s*(\S+)", llm.text_of(response))
+        if not m or not (asin := ASIN.findall(m[2] + "/")) or asin[0] not in seen:
+            log.info("No %s product page found for %r", site, item)
+            return None
+        return m[1].strip()[:120], asin[0]
+
+    def wish_list(self) -> list[WishItem]:
+        return sorted(self.store.load_all("wish", WishItem), key=lambda w: w.at, reverse=True)
+
+    async def add_to_wishlist(self, item: str) -> WishResult:
+        """Find it on Amazon, keep it for the family, and send them the link."""
+        item = " ".join(item.split()).strip(" .")[:120]
+        if len(item) < 2:
+            return WishResult(saved=False, message="What would you like me to add to your wish list?")
+        p, site = self.profile(), self.amazon_site()
+        found = await self._find_product(item, site)
+        title, asin = found or ("", "")
+        url = f"https://www.{site}/dp/{asin}" if asin else f"https://www.{site}/s?k={quote_plus(item)}"
+        wish = WishItem(at=now().isoformat(), item=item, title=title, asin=asin, url=url)
+        self.store.save("wish", wish)
+        alert = await self.raise_alert("info", "wish", f"{p.preferred_name} would like {title or item}",
+                                       f"On their wish list: {title or item}. {url}", sms=True)
+        told = bool(alert.notified)
+        family = f" and sent {p.caregiver_name} the link" if told else ""
+        said = (f"I found {title} on Amazon and saved it to your wish list{family}." if title else
+                f"I've saved {item} to your wish list{family}" + (f", so {p.caregiver_name} can find it on Amazon." if told else "."))
+        return WishResult(saved=True, item=wish, family_told=told, message=said)
+
+    def wish_for_alexa(self) -> WishItem | None:
+        """A wish saved moments ago with an Amazon product, not yet handed to Alexa: the Echo adds it to the Wish List."""
+        cutoff = (now() - timedelta(seconds=WISH_SENT_S)).isoformat()
+        wish = next((w for w in self.wish_list() if w.at >= cutoff and w.asin and not w.sent_to_alexa), None)
+        if wish:
+            wish.sent_to_alexa = True
+            self.store.save("wish", wish)
+        return wish
+
+    def wish_on_amazon(self, wish_id: str, added: bool) -> WishItem | None:
+        wish = next((w for w in self.wish_list() if w.id == wish_id), None)
+        if wish:
+            wish.status = "on_amazon" if added else "not_on_amazon"
+            self.store.save("wish", wish)
+        return wish
+
     # ---------- companionship ----------
 
     def memories(self) -> list[Memory]:
@@ -1672,6 +1758,7 @@ class CareService:
             "family_messages": [{**m.model_dump(exclude={"file_id", "telegram_chat"}),
                                  "media_url": media.url(m.id) if m.media else ""} for m in self.family_messages()[:5]],
             "memories": [m.model_dump() for m in self.memories()[:6]],
+            "wishes": [w.model_dump() for w in self.wish_list()[:8]],
             "ask_enabled": llm.enabled(),
             "trends": self.wellbeing_trends(),
             "impact": self.impact(),

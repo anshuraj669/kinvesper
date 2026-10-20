@@ -291,6 +291,11 @@
   .memory { padding: 12px 14px; border-radius: 18px; background: var(--well); margin-bottom: 10px; }
   .memory p { margin: 4px 0 0; white-space: pre-line; }
   .memory:last-child { margin-bottom: 0; }
+  .wish { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 18px; background: var(--well); margin-bottom: 8px; }
+  .wish:last-child { margin-bottom: 0; }
+  .wish .what { flex: 1; min-width: 0; }
+  .wish .what b { display: block; overflow-wrap: anywhere; }
+  .wish .meta { font-size: 12px; color: var(--muted); }
 
   @media (prefers-reduced-motion: reduce) {
     .backdrop i, .card, .banner .icon { animation: none !important; }
@@ -553,7 +558,7 @@
   const KIND = {
     missed_dose: "Missed dose", scam: "Scam", inactivity: "Quiet", emergency: "Emergency", refill: "Refill",
     caregiver_message: "Message", checkin: "Check-in", low_stock: "Low stock", test: "Test", report: "Report", reminder: "Reminder",
-    interaction: "Interaction", pattern: "Pattern", no_checkin: "No check-in",
+    interaction: "Interaction", pattern: "Pattern", no_checkin: "No check-in", wish: "Wish list",
   };
   const BANNER_ICON = {
     good: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
@@ -730,6 +735,7 @@
       card("span-5", "Reminders and alarms", "Set by voice. Alarms ring on the Echo.", reminders),
       messagesCard(d),
       memoriesCard(d),
+      wishCard(d),
       card("span-7", "Medications", h("a", { href: document.getElementById("settings").href }, "Edit in Settings"), meds),
       card("span-5", "Pharmacy refills", p.pharmacy_name, refills),
     ].filter(Boolean));
@@ -868,6 +874,18 @@
           h("p", {}, m.text)))
       : [h("p", { class: "empty" }, `When ${p.preferred_name} says “let's chat”, Kinvesper asks about their life. The stories ${p.preferred_name} shares appear here.`)];
     return card("span-7", "Memories", `Stories ${p.preferred_name} shared in companionship chats`, ...body);
+  }
+
+  function wishCard(d) {
+    const p = d.profile;
+    const where = { on_amazon: "On their Amazon Wish List", not_on_amazon: "Saved here (not on Amazon's list)", saved: "Saved" };
+    const body = d.wishes.length
+      ? d.wishes.map((w) => h("div", { class: "wish" },
+          h("div", { class: "what" }, h("b", {}, w.title || w.item),
+            h("div", { class: "meta" }, `${w.title && w.title !== w.item ? `Asked for “${w.item}” · ` : ""}${where[w.status] || "Saved"} · ${ago(w.at)}`)),
+          h("a", { class: "btn small", href: w.url, target: "_blank", rel: "noopener noreferrer" }, w.asin ? "View on Amazon" : "Search Amazon")))
+      : [h("p", { class: "empty" }, `When ${p.preferred_name} says “add a reading lamp to my wish list”, Kinvesper finds it on Amazon and it appears here, with the link.`)];
+    return card("span-5", "Wish list", `Things ${p.preferred_name} would like`, ...body);
   }
 
   function i18nNext(next) {
