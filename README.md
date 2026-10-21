@@ -272,17 +272,36 @@ With OAuth on, the dashboard needs `DASHBOARD_KEY` (`/dashboard?key=...`).
 
 With OAuth on (deployed), caregivers **sign in** to the dashboard through Amazon Cognito's hosted
 login page instead of passing around a `?key=` link (which keeps working for EventBridge and
-bookmarks). Logins are made with `make login EMAIL=...`: nobody can sign themselves up. Once their
-clients are set up, the same page offers **Continue with Google** and **Login with Amazon**. Anyone
-has a Google or Amazon account, so such a login gets in only when its verified email is the
-caregiver's or the backup's in Settings, or listed in `CAREGIVER_LOGINS`; take an email out of
-Settings and its session stops working. (Amazon sends no `email_verified`; it only lets an account
-in once its email is confirmed, so Kinvesper treats its email as verified.)
+bookmarks). The page offers email and password (made with `make login EMAIL=...`) and, once their
+clients are set up, **Continue with Google** and **Login with Amazon**. Only verified emails count.
+(Amazon sends no `email_verified`; it only lets an account in once its email is confirmed, so
+Kinvesper treats its email as verified.)
+
+### Many families
+
+One server serves many families, each with a **household** of its own: its own person, medicines,
+alerts, Telegram chats and everything else, in a DynamoDB partition of its own
+([households.py](src/kinvesper/households.py)).
+
+- **A new family signs up** with Google or Amazon: anyone whose email isn't in a family yet lands on
+  `/welcome`, says who they care for, and goes on to Settings. `-c signup=off` closes sign-up;
+  `MAX_HOUSEHOLDS` (50) caps it.
+- **Family who can sign in** (Settings) lists the emails that may sign in to a household. Anyone on
+  it can add or remove others (not themselves); an email belongs to one family at most, and taking
+  it off the list ends its session.
+- **The first household** (Margaret in the demo) is the one the `?key=` links, the simulator key and
+  an unlinked Echo reach. For it, the caregiver's and backup's emails in Settings and
+  `CAREGIVER_LOGINS` also sign in, and so do logins made with `make login` that no family lists.
+- **Which household a request is about:** the signed-in caregiver's; on `/mcp` the household of the
+  OAuth token's login; on the Echo the linked account's; on Telegram the chat's; for signed links
+  (voice notes, "press 1" on alert calls) the household signed into them. Alert emails go out through
+  the same SNS topic with a per-household filter, so families never get each other's.
 
 The same logins **link the Alexa skill** (account linking, Cognito as the OAuth server) and the
-Alexa+ add-on. With `-c alexaAccountLinking=true` the skill answers only once a family login is
-linked; until then it says so and puts a **Link account** card in the Alexa app. The Google rule
-applies there too, and on `/mcp`: Cognito's userInfo endpoint gives the email behind the token.
+Alexa+ add-on: an Echo whose Alexa app has a family's login linked talks to that family. With
+`-c alexaAccountLinking=true` the skill answers only once a family login is linked; until then it
+says so and puts a **Link account** card in the Alexa app. Cognito's userInfo endpoint gives the
+email behind a token.
 
 Both are free. The redirect URL for each is the stack output `GoogleRedirectUri`
 (`https://kinvesper-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse`).
@@ -439,7 +458,8 @@ Details and the AWS services per phase are in [PHASES.md](PHASES.md).
   voice, wellbeing trends, the family safe word, impact numbers
 - [x] **Phase 9:** caregiver sign-in (Cognito, optional Google and Login with Amazon), Alexa account
   linking, the wish list (Amazon search, Alexa Shopping's Wish List)
-- [ ] **Next:** multi-family accounts, Alexa+ add-on (waiting on the allowlist)
+- [x] **Phase 10:** many families: sign up with Google or Amazon, a household each, family sign-in lists
+- [ ] **Next:** Alexa+ add-on (waiting on the allowlist)
 
 ## License
 

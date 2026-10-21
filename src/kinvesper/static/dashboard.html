@@ -365,7 +365,10 @@
   // Signed in rather than opened with ?key=: an expired session goes back to the sign-in page.
   const fetch = async (...args) => {
     const r = await window.fetch(...args);
-    if (r.status === 401 && !key) location.href = `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    if (r.status === 401 && !key) {
+      const d = await r.clone().json().catch(() => ({}));  // signed in with no family yet: set one up
+      location.href = d.signup || `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    }
     return r;
   };
   if (!key) window.fetch("/auth/me").then((r) => (r.ok ? r.json() : null)).then((me) => {
@@ -594,6 +597,14 @@
       next ? `next: ${next.medication} at ${clock(next.time)}` : "no more doses today",
       `last active ${ago(p.last_activity)}`].join(" · ");
     let tone, title, action = null;
+    if (!d.medications.length && !openAlerts.length) {  // a family that just signed up
+      const b = h("section", { class: "banner good", role: "status" });
+      const icon = h("div", { class: "icon" }); icon.innerHTML = BANNER_ICON.good;
+      b.append(icon, h("div", { class: "grow" }, h("h2", {}, `Welcome! Let's set up Kinvesper for ${name}`),
+        h("p", {}, `Add ${name}'s medicines and your phone or Telegram in Settings. Then open Kinvesper on their Echo, or try it here in the voice simulator.`)),
+        h("a", { class: "btn primary act", href: document.getElementById("settings").href }, "Open Settings"));
+      return b;
+    }
     if (urgent.length) {
       tone = "critical"; title = urgent[0].title;
       action = h("button", { class: "btn primary act", type: "button", onclick: () => ack(urgent[0].id) }, "Acknowledge");
@@ -667,7 +678,7 @@
     const todayCard = card("span-5", "Today's doses", day(d.today.date, { weekday: "long", month: "long", day: "numeric" }),
       h("div", { class: "progress", role: "img", "aria-label": `${taken} of ${today.length} doses taken` }, h("span", { style: `width:${pctToday}%` })),
       next ? h("div", { class: "next" }, h("strong", {}, i18nNext(next)), next.purpose ? ` · ${next.purpose}` : "") : null,
-      doses);
+      today.length ? doses : h("p", { class: "empty" }, "No doses scheduled. Add medicines in Settings and they appear here."));
 
     // ---- reminders and alarms
     const when = (iso) => new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -695,7 +706,7 @@
       h("div", { class: "card-head" }, h("div", { class: "grow" }, h("h2", {}, "Weekly report"), h("p", { class: "sub" }, "Written by Claude from the week's data")), sendReport),
       ...report);
 
-    const meds = h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Medication"), h("th", {}, "Times"), h("th", { class: "num" }, "Pills left"))),
+    const meds = !d.medications.length ? h("p", { class: "empty" }, "No medicines yet.") : h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Medication"), h("th", {}, "Times"), h("th", { class: "num" }, "Pills left"))),
       h("tbody", {}, d.medications.map((m) => h("tr", {},
         h("td", {}, h("strong", {}, m.name), ` ${m.dose}`, m.instructions ? h("div", { class: "meta", style: "color:var(--muted)" }, m.instructions) : null,
           m.low_stock ? h("div", {}, lowStock()) : null),

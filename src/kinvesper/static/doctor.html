@@ -138,7 +138,10 @@
   // Signed in rather than opened with ?key=: an expired session goes back to the sign-in page.
   const fetch = async (...args) => {
     const r = await window.fetch(...args);
-    if (r.status === 401 && !key) location.href = `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    if (r.status === 401 && !key) {
+      const d = await r.clone().json().catch(() => ({}));  // signed in with no family yet: set one up
+      location.href = d.signup || `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    }
     return r;
   };
   const $ = (id) => document.getElementById(id);

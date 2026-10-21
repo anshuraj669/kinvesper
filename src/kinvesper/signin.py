@@ -8,11 +8,12 @@
 
 Cognito is the identity provider for everything: its own logins (made with `make login`, no self
 sign-up) and, once their client IDs and secrets are set up, "Continue with Google" and "Login with
-Amazon" on the same page. Anyone has a Google or Amazon account, so such a login is let in only when
-its verified email belongs to the family: the caregiver's or backup's email in Settings, or one
-listed in CAREGIVER_LOGINS. A login made in the user pool itself is always let in. (Amazon sends no
-email_verified claim; it confirms an account's email before the account can be used, so its email
-counts as verified.)
+Amazon" on the same page. Which household a login belongs to is households.Households.resolve: an
+email on a family's sign-in list, or for the first household its caregiver's or backup's email in
+Settings or CAREGIVER_LOGINS. A Google or Amazon login with none signs in only to start a household
+of its own (/welcome, when SIGNUP is on); a login made in the user pool belongs to the first household
+unless a family lists it. Only verified emails count. (Amazon sends no email_verified claim; it
+confirms an account's email before the account can be used, so its email counts as verified.)
 
 The same rule decides which accounts may link the Alexa skill and Alexa+ (see auth.JwtTokenVerifier):
 their access tokens carry no email, so it comes from Cognito's userInfo endpoint.
@@ -101,6 +102,9 @@ def unseal(value: str) -> dict | None:
 
 # ---------- who may sign in ----------
 
+# The household of a login's email (and whether it's a Google/Amazon login), or None: households.py.
+Resolve = Callable[[str, bool], str | None]
+
 def family_emails(profile) -> set[str]:
     listed = settings.caregiver_logins.replace(",", " ").split()
     return {e.strip().lower() for e in [*listed, profile.caregiver_email, profile.backup_email] if e and "@" in e}
@@ -124,11 +128,16 @@ def provider(claims: dict) -> str:
     return next((p for p in PROVIDERS if name.startswith(f"{p}_")), "")
 
 
-def allowed(claims: dict, emails: set[str]) -> bool:
+def verified(claims: dict) -> bool:
+    """A login's email can be trusted: made with `make login`, or verified by Google or Amazon."""
     if not federated(claims):
-        return True  # made with `make login`: nobody can sign themselves up
-    verified = claims.get("email_verified") in (True, "true", "True") or provider(claims) in VERIFIED_EMAIL
-    return verified and str(claims.get("email") or "").lower() in emails
+        return True
+    return claims.get("email_verified") in (True, "true", "True") or provider(claims) in VERIFIED_EMAIL
+
+
+def allowed(claims: dict, emails: set[str]) -> bool:
+    """A login made in the pool, or a verified outside login whose email is one of `emails`."""
+    return not federated(claims) or (verified(claims) and str(claims.get("email") or "").lower() in emails)
 
 
 # ---------- Cognito ----------
@@ -164,16 +173,27 @@ async def userinfo(access_token: str) -> dict | None:
     return info
 
 
-def token_check(emails: Callable[[], set[str]]) -> Callable[[str, dict], Awaitable[bool]]:
-    """For auth.JwtTokenVerifier: may this (already verified) access token be used?"""
+async def token_login(token: str, claims: dict) -> tuple[str, bool] | None:
+    """(email, outside login?) behind a verified access token, or None when its email can't be trusted."""
+    info = await userinfo(token)
+    if not info:
+        return None
+    outside = federated(claims)
+    if outside and not verified({**info, "identities": info.get("identities") or [{"providerName": provider(claims) or "?"}]}):
+        return None
+    return str(info.get("email") or "").lower(), outside
+
+
+def token_check(resolve: Resolve) -> Callable[[str, dict], Awaitable[bool]]:
+    """For auth.JwtTokenVerifier: may this (already verified) access token be used? A pool login always;
+    a Google or Amazon one when its email belongs to a household."""
     async def check(token: str, claims: dict) -> bool:
         if not federated(claims):
             return True
-        info = await userinfo(token)
-        ok = bool(info) and allowed({**info, "identities": info.get("identities") or [{"providerName": provider(claims) or "?"}]},
-                                    emails())
+        login = await token_login(token, claims)
+        ok = bool(login) and resolve(*login) is not None
         if not ok:
-            log.info("Refused a %s login that isn't one of the family's emails", claims.get("username", "federated"))
+            log.info("Refused a %s login that isn't in any family", claims.get("username", "federated"))
         return ok
     return check
 
@@ -207,14 +227,20 @@ def same_site(request: Request) -> bool:
     return origin in ours
 
 
-def caregiver(request: Request, emails: Callable[[], set[str]]) -> dict | None:
-    """The signed-in caregiver, if the session is valid, still allowed and the request is from this site."""
+def signed_in(request: Request) -> dict | None:
+    """A valid session from this site, whether or not it belongs to a household yet."""
     s = session(request)
-    if not s or not same_site(request):
+    return s if s and same_site(request) else None
+
+
+def caregiver(request: Request, resolve: Resolve) -> dict | None:
+    """The signed-in caregiver, with their "household", if the session is valid, the request is from this
+    site and their email still belongs to a family (it may have been taken off the list since)."""
+    s = signed_in(request)
+    if not s:
         return None
-    if s.get("fed") and not allowed({"identities": [True], "email": s.get("email"), "email_verified": True}, emails()):
-        return None  # their email was taken out of Settings since they signed in
-    return s
+    home = resolve(str(s.get("email") or ""), bool(s.get("fed")))
+    return {**s, "household": home} if home else None
 
 
 def login_url(path: str) -> str:
@@ -250,7 +276,7 @@ def page(title: str, text: str, href: str, action: str, status: int = 200) -> HT
     return HTMLResponse(PAGE.format(title=title, text=text, href=href, action=action), status_code=status)
 
 
-def signin_routes(emails: Callable[[], set[str]]) -> list[Route]:
+def signin_routes(resolve: Resolve) -> list[Route]:
     if not enabled():
         return []
 
@@ -292,15 +318,17 @@ def signin_routes(emails: Callable[[], set[str]]) -> list[Route]:
         except (httpx.HTTPError, KeyError, ValueError, jwt.PyJWTError) as e:
             log.warning("Sign-in failed at the token step: %s", e)
             return page("Sign-in failed", "Kinvesper couldn't confirm the sign-in. Please try again.", again, "Sign in again", 502)
-        if not allowed(claims, emails()):
-            log.info("Refused dashboard sign-in for an email that isn't the family's")
+        email, outside = str(claims.get("email") or "").lower(), federated(claims)
+        home = resolve(email, outside) if verified(claims) else None
+        if not home and not (outside and email and verified(claims) and settings.signup):
+            log.info("Refused dashboard sign-in for an email that isn't in any family")
             return page("This account isn't on the list",
                         f"{claims.get('email') or 'This account'} isn't one of this family's logins. Ask the caregiver to "
                         "add your email in Settings, then sign in again.", "/auth/logout", "Use another account", 403)
-        name = claims.get("name") or claims.get("given_name") or str(claims.get("email", "")).split("@")[0]
-        cookie = seal({"sub": claims["sub"], "email": claims.get("email", ""), "name": name, "fed": federated(claims),
+        name = claims.get("name") or claims.get("given_name") or email.split("@")[0]
+        cookie = seal({"sub": claims["sub"], "email": email, "name": name, "fed": outside,
                        "exp": int(time.time()) + SESSION_S})
-        out = RedirectResponse(_next(flow.get("next")), status_code=302)
+        out = RedirectResponse(_next(flow.get("next")) if home else "/welcome", status_code=302)  # new: set up a family
         out.set_cookie(COOKIE, cookie, max_age=SESSION_S, path="/", httponly=True, secure=_secure(), samesite="lax")
         out.delete_cookie(FLOW_COOKIE, path="/auth")
         log.info("Caregiver signed in to the dashboard")
@@ -321,8 +349,10 @@ def signin_routes(emails: Callable[[], set[str]]) -> list[Route]:
         return page("You're signed out", "You've signed out of the Kinvesper dashboard.", "/auth/login?next=/dashboard", "Sign in")
 
     async def me(request: Request) -> Response:
-        s = caregiver(request, emails)
+        s = caregiver(request, resolve)
         if not s:
+            if signed_in(request):
+                return JSONResponse({"error": "Set up your family first", "signup": "/welcome"}, status_code=401)
             return JSONResponse({"error": "Not signed in", "login": login_url("/dashboard")}, status_code=401)
         return JSONResponse({"email": s.get("email", ""), "name": s.get("name", "")})
 

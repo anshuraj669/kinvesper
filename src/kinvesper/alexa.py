@@ -5,9 +5,10 @@
 Alexa+ add-ons reach /mcp directly, but that tooling is allowlisted. Until then a custom skill
 ("Alexa, open kin vesper") hands each phrase to the same voice agent as the simulator, which calls
 the same MCP tools. A catch-all slot carries the whole utterance; Yes/No answer Kinvesper's
-confirmation questions; Stop and Cancel end the conversation. With ALEXA_ACCOUNT_LINKING=required the
-skill answers only once a family login is linked in the Alexa app (the same Cognito logins as the
-dashboard): until then it asks for linking and puts a Link account card in the app. "Set up my pill reminders" asks for the
+confirmation questions; Stop and Cancel end the conversation. An Echo whose Alexa app has a family's
+login linked (the same Cognito logins as the dashboard) talks to that family's household; any other
+reaches the first household, or with ALEXA_ACCOUNT_LINKING=required is asked to link and gets a Link
+account card in the app. "Set up my pill reminders" asks for the
 reminders permission by voice and has the Echo itself remind the person at every dose time. On an Echo
 Show every reply also shows today's medicines, with a "Taken" button for each dose that's due. When the
 skill opens, family messages sent from the dashboard are read out first.
@@ -40,9 +41,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from . import apl, llm, media, signin
-from .auth import JwtTokenVerifier
+from . import apl, llm, media
 from .config import settings
+from .households import Households, within
 from .i18n import lang, t
 from .reminders import SCOPE, TIMER_SCOPE, EchoReminders, spoken_times
 from .service import CareService, heard_messages, heard_one
@@ -181,10 +182,13 @@ class AlexaBridge:
     """One Kinvesper voice session per Alexa session."""
 
     def __init__(self, sessions: VoiceSessions, service: CareService | None = None,
-                 linked: Callable[[str], Awaitable[bool]] | None = None):
+                 linked: Callable[[str], Awaitable[str | None]] | None = None, required: bool = False):
         self.sessions = sessions
-        self.service = service
-        self.linked = linked  # account linking required: is this access token a family login?
+        homes = Households.of(service) if service is not None else None
+        self.service = homes.current if homes else None
+        self.first = homes.first if homes else settings.patient_id
+        self.linked = linked  # the household of a linked account's access token, or None
+        self.required = required  # answer only once a family login is linked
         self.reminders = EchoReminders(service.store) if service else None
         self._background: set[asyncio.Task] = set()
         self._by_alexa: dict[str, str] = {}
@@ -206,11 +210,16 @@ class AlexaBridge:
 
     async def handle(self, body: dict) -> dict:
         kind = (body.get("request") or {}).get("type", "")
-        if self.linked and kind != "SessionEndedRequest":
-            user = ((body.get("context") or {}).get("System") or {}).get("user") or (body.get("session") or {}).get("user") or {}
-            token = user.get("accessToken") or ""
-            if not token or not await self.linked(token):
-                return link_account((body.get("request") or {}).get("locale") or "en-US")
+        user = ((body.get("context") or {}).get("System") or {}).get("user") or (body.get("session") or {}).get("user") or {}
+        token = user.get("accessToken") or ""
+        home = await self.linked(token) if token and self.linked else None
+        # Not linked: the first household, unless linking is required. Linked to a login in no family: link another.
+        if not home and (self.required or (token and self.linked)) and kind != "SessionEndedRequest":
+            return link_account((body.get("request") or {}).get("locale") or "en-US")
+        with within(home or self.first):
+            return await self._answer(body)
+
+    async def _answer(self, body: dict) -> dict:
         reply = await self._handle(body)
         response = reply.get("response")
         photo = self._photos.pop((body.get("session") or {}).get("sessionId", ""), None)
@@ -398,13 +407,10 @@ def alexa_routes(sessions: VoiceSessions, service: CareService | None = None) ->
     if not settings.alexa_skill_id:
         return []
     verifier = RequestVerifier(settings.alexa_skill_id)
-    linked = None
-    if settings.alexa_account_linking == "required" and settings.oauth_issuer and service:
-        tokens = JwtTokenVerifier(settings, allow=signin.token_check(lambda: signin.family_emails(service.profile())))
-
-        async def linked(token: str) -> bool:
-            return await tokens.verify_token(token) is not None
-    bridge = AlexaBridge(sessions, service, linked)
+    homes = Households.of(service) if service is not None else None
+    required = settings.alexa_account_linking == "required" and bool(settings.oauth_issuer and homes)
+    bridge = AlexaBridge(sessions, homes.current if homes else None,
+                         homes.of_token if homes and settings.oauth_issuer else None, required)
 
     async def endpoint(request: Request) -> Response:
         body = await request.body()

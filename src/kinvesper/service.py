@@ -30,7 +30,7 @@ from . import (
     telegram,
     when,
 )
-from .config import now, settings
+from .config import household_id, now, settings
 from .models import (
     Alert,
     AlertKind,
@@ -227,8 +227,10 @@ class SettingsError(ValueError):
 
 
 class CareService:
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, household: str = "", directory: Store | None = None):
         self.store = store
+        self.household = household or settings.patient_id
+        self.directory = directory  # households.py: Telegram chats and link codes -> household
 
     # ---------- profile & activity ----------
 
@@ -639,7 +641,7 @@ class CareService:
             if r.medication_id == med.id and r.status in OPEN_REFILL:
                 return RefillResult(refill=r, message=f"A refill for {med.name} is already on its way. {r.status_message}.")
 
-        pharmacy = self.profile().pharmacy_name
+        pharmacy = self.profile().pharmacy_name or "the pharmacy"
         stamp = now().isoformat()
         refill = Refill(medication_id=med.id, medication_name=med.name, fulfillment=fulfillment,
                         status_message=f"Refill requested for {med.name}", created_at=stamp, updated_at=stamp)
@@ -955,7 +957,10 @@ class CareService:
     @staticmethod
     def _ack_url(a: Alert) -> str:
         """Where "press 1" on the call goes (needs the server's public address)."""
-        return f"{settings.public_url.rstrip('/')}/api/calls/{a.id}/ack" if settings.public_url.startswith("https://") else ""
+        if not settings.public_url.startswith("https://"):
+            return ""
+        h = household_id()
+        return f"{settings.public_url.rstrip('/')}/api/calls/{a.id}/ack" + ("" if h == settings.patient_id else f"?h={h}")
 
     async def _ring(self, a: Alert) -> None:
         """Call the caregiver about an urgent alert, once."""
@@ -1021,6 +1026,8 @@ class CareService:
                 self.store.delete("tglink", old.id)
         code = secrets.token_urlsafe(12)
         self.store.save("tglink", TelegramLink(id=code, audience=audience, created_at=current.isoformat()), id=code)
+        if self.directory is not None:  # so the bot's /start finds this household
+            self.directory.put("tgcode", code, {"household": self.household, "at": current.isoformat()})
         if not (url := await telegram.link_url(code)):
             raise SettingsError("Couldn't reach Telegram just now. Please try again.")
         return {"url": url, "bot": await telegram.bot_username(), "minutes": int(LINK_LIFETIME.total_seconds() // 60)}
@@ -1031,6 +1038,8 @@ class CareService:
         p = self.profile()
         chat = getattr(p, f"{audience}_telegram", "")
         self.store.save("profile", p.model_copy(update={f"{audience}_telegram": "", f"{audience}_telegram_name": ""}), id="main")
+        if chat and self.directory is not None and (self.directory.get("tgchat", chat) or {}).get("household") == self.household:
+            self.directory.delete("tgchat", chat)
         if chat:
             await telegram.send(chat, "You've been disconnected from Kinvesper alerts. Connect again any time from Settings.")
         return await self.settings_view()
@@ -1078,6 +1087,9 @@ class CareService:
         link = self.store.load("tglink", code, TelegramLink) if code else None
         if link and link.created_at >= (current - LINK_LIFETIME).isoformat():
             self.store.delete("tglink", link.id)
+            if self.directory is not None:
+                self.directory.delete("tgcode", link.id)
+                self.directory.put("tgchat", chat_id, {"household": self.household})
             p = p.model_copy(update={f"{link.audience}_telegram": chat_id, f"{link.audience}_telegram_name": tg_name})
             self.store.save("profile", p, id="main")
             when_ = ("" if link.audience == "caregiver"

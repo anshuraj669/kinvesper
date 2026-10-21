@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 from zoneinfo import ZoneInfo
@@ -88,6 +89,10 @@ class Settings:
     login_client_id: str = field(default_factory=lambda: _env("LOGIN_CLIENT_ID"))
     # Emails that may sign in with Google besides the caregiver's and backup's in Settings (comma-separated).
     caregiver_logins: str = field(default_factory=lambda: _env("CAREGIVER_LOGINS"))
+    # New families may sign up on the dashboard with Google or Amazon, each with a household of its own
+    # (households.py), up to MAX_HOUSEHOLDS. "off" = only the first household and the family it lists.
+    signup: bool = field(default_factory=lambda: _env("SIGNUP", "on").lower() not in ("off", "false", "0", "no"))
+    max_households: int = field(default_factory=lambda: int(_env("MAX_HOUSEHOLDS", "50")))
     # "required": the Alexa skill answers only once a family login is linked in the Alexa app.
     alexa_account_linking: str = field(default_factory=lambda: _env("ALEXA_ACCOUNT_LINKING").lower())
     # The Amazon site wish list items are found on (amazon.in, amazon.com...). Empty = from CARE_TZ.
@@ -125,6 +130,15 @@ class Settings:
 
 
 settings = Settings()
+
+# The household the current request or task is about (households.py); its id is the store partition.
+household: ContextVar[str] = ContextVar("household", default="")
+# Sent to /mcp by the built-in voice agent (with SERVICE_TOKEN): the household its session is for.
+HOUSEHOLD_HEADER = "x-kinvesper-household"
+
+
+def household_id() -> str:
+    return household.get() or settings.patient_id
 
 
 def now() -> datetime:

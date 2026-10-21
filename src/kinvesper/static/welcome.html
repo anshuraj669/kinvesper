@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome to Kinvesper</title>
+<style>
+  :root {
+    color-scheme: light;
+    --base: #e9eef0; --ink: #0f1a19; --ink-2: #33423f; --muted: #556461; --line: rgba(15,30,28,.11);
+    --glass: rgba(255,255,255,.58); --glass-strong: rgba(255,255,255,.80); --glass-edge: rgba(255,255,255,.75);
+    --well: rgba(15,30,28,.06); --blob-1: #7dd3c8; --blob-2: #93b8f5; --blob-3: #c9b6f2; --blob-4: #f7c9a8;
+    --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.35) inset, 0 2px 6px rgba(20,40,40,.06), 0 24px 48px -18px rgba(20,40,60,.28);
+    --blur: blur(28px) saturate(170%);
+    --brand: #0f766e; --brand-ink: #ffffff; --brand-soft: rgba(15,118,110,.13); --critical: #d03b3b; --critical-soft: rgba(208,59,59,.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --base: #070b0f; --ink: #eef4f3; --ink-2: #c4d0cd; --muted: #97a6a3; --line: rgba(255,255,255,.10);
+      --glass: rgba(38,48,54,.46); --glass-strong: rgba(44,56,62,.76); --glass-edge: rgba(255,255,255,.16);
+      --well: rgba(0,0,0,.24); --blob-1: #0e6b62; --blob-2: #1d3f8a; --blob-3: #4b2a7a; --blob-4: #7a3b1f;
+      --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.07) inset, 0 24px 56px -20px rgba(0,0,0,.7);
+      --brand: #2dd4bf; --brand-ink: #04201c; --brand-soft: rgba(45,212,191,.16); --critical: #ff6b63; --critical-soft: rgba(255,95,87,.14);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --base: #070b0f; --ink: #eef4f3; --ink-2: #c4d0cd; --muted: #97a6a3; --line: rgba(255,255,255,.10);
+    --glass: rgba(38,48,54,.46); --glass-strong: rgba(44,56,62,.76); --glass-edge: rgba(255,255,255,.16);
+    --well: rgba(0,0,0,.24); --blob-1: #0e6b62; --blob-2: #1d3f8a; --blob-3: #4b2a7a; --blob-4: #7a3b1f;
+    --depth: 0 1px 0 var(--glass-edge) inset, 0 0 0 1px rgba(255,255,255,.07) inset, 0 24px 56px -20px rgba(0,0,0,.7);
+    --brand: #2dd4bf; --brand-ink: #04201c; --brand-soft: rgba(45,212,191,.16); --critical: #ff6b63; --critical-soft: rgba(255,95,87,.14);
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--base); }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; color: var(--ink);
+    font: 15px/1.5 -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; background: transparent; }
+  .backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .backdrop i { position: absolute; width: 58vmax; height: 58vmax; border-radius: 50%; filter: blur(90px); opacity: .75; }
+  .backdrop i:nth-child(1) { background: var(--blob-1); top: -22vmax; left: -14vmax; }
+  .backdrop i:nth-child(2) { background: var(--blob-2); top: -10vmax; right: -20vmax; }
+  .backdrop i:nth-child(3) { background: var(--blob-3); bottom: -26vmax; left: 18vmax; }
+  .backdrop i:nth-child(4) { background: var(--blob-4); bottom: -30vmax; right: -12vmax; opacity: .45; }
+  main { width: 100%; max-width: 520px; padding: 30px 30px 26px; border-radius: 28px; background: var(--glass);
+    -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: var(--depth); }
+  @media (prefers-reduced-transparency: reduce) { main { background: var(--glass-strong); backdrop-filter: none; -webkit-backdrop-filter: none; } }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-weight: 650; }
+  .logo { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff;
+    background: linear-gradient(135deg, #14b8a6, #0f766e); box-shadow: 0 6px 16px -6px rgba(15,118,110,.6); }
+  .logo svg { width: 18px; height: 18px; }
+  h1 { font-size: 24px; line-height: 1.25; margin: 0 0 6px; font-weight: 700; letter-spacing: -.01em; }
+  .lead { color: var(--muted); margin: 0 0 22px; }
+  form { display: grid; gap: 16px; }
+  fieldset { border: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  legend { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; padding: 0; }
+  .row { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 480px) { .row { grid-template-columns: 1fr; } main { padding: 24px 18px 20px; } }
+  .field { display: grid; gap: 5px; }
+  label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+  .hint { font-size: 12.5px; color: var(--muted); }
+  input { font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 12px; border: none; width: 100%; min-width: 0;
+    background: var(--well); color: var(--ink); box-shadow: 0 0 0 1px var(--line) inset; }
+  input:focus { outline: none; background: var(--glass-strong); box-shadow: 0 0 0 2px var(--brand) inset, 0 0 0 5px var(--brand-soft); }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .preset { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 999px; border: none; cursor: pointer;
+    background: var(--well); color: var(--ink-2); box-shadow: 0 0 0 1px var(--line) inset; }
+  .preset[aria-pressed="true"] { background: var(--brand-soft); color: var(--brand); font-weight: 600; box-shadow: 0 0 0 1px var(--brand) inset; }
+  .error { display: none; padding: 10px 12px; border-radius: 12px; background: var(--critical-soft); color: var(--critical); font-weight: 600; font-size: 14px; }
+  .error.show { display: block; }
+  .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+  button.go { font: inherit; font-weight: 650; padding: 11px 20px; border-radius: 999px; border: none; cursor: pointer;
+    background: var(--brand); color: var(--brand-ink); box-shadow: 0 8px 20px -10px var(--brand); }
+  button.go:disabled { opacity: .6; cursor: default; }
+  .who { font-size: 13px; color: var(--muted); }
+  .who a { color: var(--brand); font-weight: 600; text-decoration: none; }
+  .steps { margin: 20px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); list-style: none; display: grid; gap: 6px; font-size: 13.5px; color: var(--muted); }
+  .steps b { color: var(--ink-2); }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<main>
+  <div class="brand">
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10Z"/></svg></div>
+    Kinvesper
+  </div>
+  <h1 id="title">Set up Kinvesper for your family</h1>
+  <p class="lead" id="lead">Tell us who you're caring for. Medicines, contacts and alerts come next, in Settings.</p>
+  <form id="form" novalidate>
+    <fieldset>
+      <legend>The person you care for</legend>
+      <div class="row">
+        <div class="field"><label for="patient">Full name</label><input id="patient" autocomplete="off" required maxlength="80" placeholder="Margaret Wilson"></div>
+        <div class="field"><label for="preferred">What Kinvesper calls them</label><input id="preferred" autocomplete="off" maxlength="40" placeholder="Margaret"><span class="hint">How the Echo greets them.</span></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>You</legend>
+      <div class="field"><label for="you">Your name</label><input id="you" autocomplete="name" required maxlength="60"></div>
+      <div class="field">
+        <label id="relLabel">You are their</label>
+        <div class="presets" role="group" aria-labelledby="relLabel" id="relations"></div>
+      </div>
+    </fieldset>
+    <div class="error" id="error" role="alert"></div>
+    <div class="actions">
+      <button class="go" id="go" type="submit">Create our Kinvesper</button>
+      <span class="who" id="who"></span>
+    </div>
+  </form>
+  <ol class="steps">
+    <li><b>Next:</b> add their medicines, your phone and Telegram in Settings.</li>
+    <li><b>Then:</b> add family who may sign in, and link Kinvesper in the Alexa app on their Echo.</li>
+  </ol>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const RELATIONS = ["daughter", "son", "grandchild", "spouse", "carer", "friend"];
+  let relation = "daughter";
+  for (const r of RELATIONS) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "preset"; b.textContent = r[0].toUpperCase() + r.slice(1);
+    b.setAttribute("aria-pressed", String(r === relation));
+    b.onclick = () => { relation = r; for (const x of $("relations").children) x.setAttribute("aria-pressed", String(x === b)); };
+    $("relations").append(b);
+  }
+  const fail = (text) => { $("error").textContent = text; $("error").classList.toggle("show", !!text); };
+
+  fetch("/api/households").then(async (r) => {
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 401) { location.href = d.login || "/auth/login?next=/welcome"; return; }
+    if (d.name && !$("you").value) $("you").value = d.name;
+    const out = document.createElement("a"); out.href = "/auth/logout"; out.textContent = "Not you?";
+    $("who").replaceChildren(`Signed in as ${d.email} · `, out);
+    if (!d.open) {
+      $("title").textContent = "Kinvesper isn't taking new families yet";
+      $("lead").textContent = "If your family already uses Kinvesper, ask them to add your email in Settings, then sign in again.";
+      $("form").hidden = true;
+    }
+  });
+
+  $("patient").addEventListener("input", () => { $("preferred").placeholder = $("patient").value.trim().split(/\s+/)[0] || "Margaret"; });
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    fail("");
+    if (!$("patient").value.trim()) { $("patient").focus(); return fail("Add the name of the person you care for."); }
+    if (!$("you").value.trim()) { $("you").focus(); return fail("Add your name."); }
+    $("go").disabled = true; $("go").textContent = "Setting up…";
+    try {
+      const r = await fetch("/api/households", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        patient_name: $("patient").value, preferred_name: $("preferred").value, your_name: $("you").value, relation }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Couldn't set up your family. Please try again.");
+      location.href = d.next || "/dashboard/settings";
+    } catch (err) {
+      fail(err.message);
+      $("go").disabled = false; $("go").textContent = "Create our Kinvesper";
+    }
+  });
+})();
+</script>
+</body>
+</html>

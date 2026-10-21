@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from . import signin
 from .auth import JwtTokenVerifier, auth_settings
 from .config import now, settings
+from .households import Households
 from .icons import AMBER, BLUE, GREEN, PURPLE, RED, SLATE, TEAL, icon
 from .models import (
     CareSummary,
@@ -140,13 +141,16 @@ def _can_elicit(ctx: Context) -> bool:
 
 
 def build_server(service: CareService) -> KinvesperMCP:
+    """The MCP server. Its tools act on the household of each request (households.py)."""
+    homes = Households.of(service)
+    service = homes.current
     auth = auth_settings(settings)
     mcp = KinvesperMCP(
         name="Kinvesper",
         instructions=INSTRUCTIONS,
         website_url=settings.base_url,
         icons=icon("logo", TEAL),
-        token_verifier=JwtTokenVerifier(settings, allow=signin.token_check(lambda: signin.family_emails(service.profile())))
+        token_verifier=JwtTokenVerifier(settings, allow=signin.token_check(homes.resolve))
         if auth else None,
         auth=auth,
         transport_security=transport_security(),

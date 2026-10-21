@@ -122,6 +122,10 @@
   .note svg { width: 14px; height: 14px; flex: none; margin-top: 3px; }
   .actions-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
   .tg-row { margin-top: 12px; }
+  .member { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px; }
+  .member .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .add-member { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  .add-member input { flex: 1 1 220px; width: auto; }
   .tg-row .actions-row { margin-top: 0; }
   .tg-row > .note + .btn { margin-top: 6px; }
   .tg-row .note a { color: var(--brand); word-break: break-all; }
@@ -267,6 +271,7 @@
   .dot.bad { box-shadow: 0 0 0 3px color-mix(in srgb, var(--critical) 22%, transparent); }
   .progress-card .bar-track { height: 10px; background: var(--well); box-shadow: 0 1px 2px rgba(0,0,0,.08) inset; }
   .progress-card .bar-track span { background: linear-gradient(90deg, #2dd4bf, var(--good)); box-shadow: 0 0 12px -2px var(--good); }
+  .member { background: var(--wash); box-shadow: 0 0 0 1px var(--well-edge) inset; }
   .item { border: none; border-radius: 18px; background: var(--wash); box-shadow: 0 0 0 1px var(--well-edge) inset; transition: background .2s, box-shadow .2s; }
   .item:hover { background: var(--glass-strong); }
   .item.open { background: var(--glass-strong); box-shadow: 0 1px 0 var(--glass-edge) inset, 0 12px 28px -14px rgba(0,0,0,.3); }
@@ -347,7 +352,10 @@
   // Signed in rather than opened with ?key=: an expired session goes back to the sign-in page.
   const fetch = async (...args) => {
     const r = await window.fetch(...args);
-    if (r.status === 401 && !key) location.href = `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    if (r.status === 401 && !key) {
+      const d = await r.clone().json().catch(() => ({}));  // signed in with no family yet: set one up
+      location.href = d.signup || `/auth/login?next=${encodeURIComponent(location.pathname)}`;
+    }
     return r;
   };
   const $ = (id) => document.getElementById(id);
@@ -582,6 +590,53 @@
     toast(`Removed ${label}`, ["Undo", () => { state[list].splice(i, 0, item); changed(); render(); }]);
   }
 
+  // ---- who may sign in: saved at once, not with the save bar ----
+  let family = null, familyEmail = "", familyMsg = ["", false];
+  async function loadFamily() {
+    try { family = await call("GET", "/api/family"); } catch { family = null; }
+    if (state) render();
+  }
+  async function familyChange(button, path, email) {
+    if (!email.trim()) { familyMsg = ["Type their email first.", true]; render(); $("family-email")?.focus(); return; }
+    button.disabled = true;
+    try {
+      family = await call("POST", path, { email });
+      const removed = path.endsWith("/remove");
+      familyMsg = [removed ? `${email} can no longer sign in.` : `${email.trim().toLowerCase()} can now sign in with Google or Amazon.`, false];
+      if (!removed) familyEmail = "";
+    } catch (err) {
+      familyMsg = [err.message, true];
+    }
+    render();
+    if (familyMsg[1]) $("family-email")?.focus();
+  }
+  function familyBlock() {
+    if (!family) return [note("muted", "Couldn't load the sign-in list. Reload the page to try again.")];
+    const people = [...family.members.map((m) => ({ ...m, removable: m.email !== family.you })),
+                    ...family.also.map((email) => ({ email, added_by: "settings", removable: false }))];
+    const add = (e) => familyChange(e.target.closest(".add-member").querySelector("button"), "/api/family", familyEmail);
+    return [
+      h("div", { class: "items" }, people.length ? people.map((m) => h("div", { class: "member" },
+        h("div", { class: "grow" },
+          h("strong", {}, m.email), m.email === family.you ? h("span", { class: "optional" }, "You") : null,
+          h("div", { class: "hint" }, m.added_by === "settings" ? "The caregiver or backup email in this page"
+            : m.added_by === m.email ? "Started this family" : `Added by ${m.added_by}`)),
+        m.removable ? h("button", { class: "btn small quiet danger", type: "button", "aria-label": `Remove ${m.email}`,
+          onclick: (e) => familyChange(e.target.closest("button"), "/api/family/remove", m.email) }, "Remove") : null))
+        : h("p", { class: "empty" }, "Nobody yet.")),
+      h("div", { class: "add-member" },
+        h("input", { id: "family-email", type: "email", value: familyEmail, placeholder: "their Google or Amazon email", autocomplete: "off",
+          "aria-label": "Email of a family member to let in", oninput: (e) => { familyEmail = e.target.value; },
+          onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); add(e); } } }),
+        h("button", { class: "btn", type: "button", onclick: add }, "Let them sign in")),
+      familyMsg[0] ? h("p", { class: `inline-msg${familyMsg[1] ? " error" : ""}`, role: "status", style: "margin:10px 0 0" }, familyMsg[0]) : null,
+      family.providers
+        ? note("muted", "They open this dashboard, choose Login with Amazon or Continue with Google with that email, and see this family. "
+          + "The same login links Kinvesper in the Alexa app on the Echo.")
+        : note("muted", "Sign-in isn't switched on for this server (LOGIN_CLIENT_ID), so this list takes effect once it is."),
+    ];
+  }
+
   // ---- how complete the setup is ----
   function status() {
     const p = state.profile;
@@ -590,11 +645,12 @@
       person: p.patient_name && p.preferred_name ? ["good", "Done"] : ["bad", "Needed"],
       caregiver: !contactSet ? ["bad", "No contact"] : state.email_status === "pending" ? ["warn", "Confirm email"] : ["good", "Done"],
       backup: p.backup_name || state.telegram?.backup ? ["good", "Done"] : ["", "Optional"],
+      family: family && family.members.length + family.also.length > 1 ? ["good", `${family.members.length + family.also.length}`] : ["", "Optional"],
       contacts: state.contacts.length ? ["good", `${state.contacts.length}`] : ["warn", "None yet"],
       medicines: state.medications.length ? ["good", `${state.medications.length}`] : ["bad", "None"],
     };
   }
-  const SECTIONS = [["person", "The person"], ["caregiver", "Caregiver"], ["backup", "Backup contact"], ["contacts", "Trusted contacts"], ["medicines", "Medicines"]];
+  const SECTIONS = [["person", "The person"], ["caregiver", "Caregiver"], ["backup", "Backup contact"], ["family", "Family sign-in"], ["contacts", "Trusted contacts"], ["medicines", "Medicines"]];
 
   function renderNav() {
     if (!state) return;
@@ -766,6 +822,8 @@
           field("Email", p, "backup_email", { type: "email", err: "p.backup_email", placeholder: "name@example.com" })),
         p.backup_email && snapshot() === saved ? note(btone, btext) : null,
         telegramBlock("backup")], { optional: true }),
+      section("family", "Family who can sign in", "Everyone here can open this dashboard and change these settings. Add the family members who help.",
+        familyBlock(), { optional: true }),
       section("contacts", "Trusted contacts", "Real numbers for the bank, the doctor and family. When a caller claims to be one of them from another number, Kinvesper tells them to hang up and reads out the real number.", [
         h("div", { class: "items" }, state.contacts.length ? state.contacts.map(contact) : h("p", { class: "empty" }, "No trusted contacts yet. Start with the bank: it's the one scammers pretend to be most.")),
         h("div", { class: "actions-row" }, h("span", { class: "hint" }, "Add:"),
@@ -886,6 +944,7 @@
       state.medications.forEach((m) => { m.times = m.times || []; });
       saved = snapshot();
       render();
+      loadFamily();
     })
     .catch((e) => $("main").replaceChildren(h("p", { class: "empty" }, `Couldn't load settings: ${e.message}`)));
 })();

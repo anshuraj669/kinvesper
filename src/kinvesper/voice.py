@@ -38,7 +38,7 @@ from pydantic import BaseModel
 
 from . import contacts, llm, speech, when
 from .i18n import LANGUAGES
-from .config import now, settings
+from .config import HOUSEHOLD_HEADER, household_id, now, settings
 from .scam import rule_assess
 
 log = logging.getLogger(__name__)
@@ -224,7 +224,7 @@ def route(text: str, meds: list[dict], caregiver: str) -> tuple[str, dict] | Non
 def http_connect(elicit: ElicitationFnT) -> AbstractAsyncContextManager[tuple[ClientSession, str]]:
     @contextlib.asynccontextmanager
     async def connect() -> AsyncIterator[tuple[ClientSession, str]]:
-        headers = {"Authorization": f"Bearer {settings.service_token}"} if settings.service_token else {}
+        headers = {"Authorization": f"Bearer {settings.service_token}", HOUSEHOLD_HEADER: household_id()} if settings.service_token else {}
         async with httpx.AsyncClient(headers=headers, timeout=httpx.Timeout(30, read=300)) as http:
             async with streamable_http_client(f"http://127.0.0.1:{settings.port}/mcp", http_client=http) as (r, w, _):
                 async with ClientSession(r, w, elicitation_callback=elicit) as session:
@@ -246,6 +246,7 @@ class VoiceSession:
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     mode: str = field(default_factory=lambda: "claude" if llm.enabled() else "offline")
     last_used: float = field(default_factory=time.monotonic)
+    household: str = field(default_factory=household_id)  # whose care data its MCP connection reaches
 
     def __post_init__(self) -> None:
         self.mcp: ClientSession | None = None

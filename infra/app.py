@@ -17,6 +17,7 @@ Context (cdk.json, or -c key=value):
   amazonClientId  Login with Amazon client ID: adds "Login with Amazon" to the login (secret: make amazon-login)
   caregiverLogins comma-separated emails that may sign in with Google, besides the caregiver's and backup's
   alexaAccountLinking  "true": the Alexa skill answers only once a family login is linked in the Alexa app
+  signup          "off": new families can't sign up on the dashboard with Google or Amazon
   retainData      "false" deletes the table and user pool with the stack
 """
 
@@ -45,6 +46,7 @@ KinvesperStack(
     amazon_client_id=ctx("amazonClientId") or "",
     caregiver_logins=ctx("caregiverLogins") or "",
     alexa_account_linking=str(ctx("alexaAccountLinking")).lower() == "true",
+    signup=str(ctx("signup")).lower() != "off",
     retain_data=str(ctx("retainData")).lower() != "false",
     description="Kinvesper: voice-first eldercare MCP server for Alexa+",
 )

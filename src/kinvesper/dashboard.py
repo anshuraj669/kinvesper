@@ -17,10 +17,16 @@
     POST /api/medications/scan       a photo of a prescription (the image as the body) -> medicines to review
     POST /api/medications/interactions  check medicines just added ({"medicines": [names]}) for interactions
     POST /api/calls/{id}/ack         Twilio, when the caregiver presses 1 on an alert call (signed by Twilio)
+    GET  /api/family                 who may sign in to this household
+    POST /api/family                 let someone sign in ({"email"}); POST /api/family/remove takes them off
+    GET  /welcome                    a new family's first page: who they care for (then Settings)
+    GET  /api/households             the signed-in newcomer ({"email", "name", "open"})
+    POST /api/households             start their household ({"patient_name", "preferred_name", "your_name", "relation"})
 
 Health data, so with OAuth on the dashboard needs a signed-in caregiver (LOGIN_CLIENT_ID, see
 signin.py) or DASHBOARD_KEY (open /dashboard?key=...; EventBridge's checks use it too), and is off
-with neither. With OAuth off (local dev) it is open.
+with neither. With OAuth off (local dev) it is open. Every call is about the household the request
+belongs to (households.py): the key's is the first household, a signed-in caregiver's their own.
 """
 
 from __future__ import annotations
@@ -34,7 +40,8 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from starlette.routing import Route
 
 from . import media, notify, signin, telegram
-from .config import settings
+from .config import household_id, settings
+from .households import Households, within
 from .models import ScanResult
 from .scheduler import check_once
 from .service import CareService, SettingsError
@@ -45,23 +52,32 @@ OFF = "The caregiver dashboard is off: with OAuth on it needs LOGIN_CLIENT_ID or
 MAX_PHOTO_BYTES = 5 * 1024 * 1024  # Claude's limit for one image
 
 
-def dashboard_routes(service: CareService) -> list[Route]:
+def dashboard_routes(service: CareService, homes: Households | None = None) -> list[Route]:
+    homes = homes or Households.of(service)
+    service = homes.current  # the household of each request
     page = files("kinvesper").joinpath("static/dashboard.html").read_text()
     settings_page = files("kinvesper").joinpath("static/settings.html").read_text()
     doctor_page = files("kinvesper").joinpath("static/doctor.html").read_text()
+    welcome_page = files("kinvesper").joinpath("static/welcome.html").read_text()
 
-    def family() -> set[str]:
-        return signin.family_emails(service.profile())
+    def keyed(request: Request) -> bool:
+        key = request.headers.get("x-dashboard-key", "")
+        return bool(settings.dashboard_key and key and hmac.compare_digest(key, settings.dashboard_key))
+
+    def member(request: Request) -> dict | None:
+        """The signed-in caregiver, if this request is about their own household."""
+        s = signin.caregiver(request, homes.resolve)
+        return s if s and s["household"] == household_id() else None
 
     def guard(request: Request) -> Response | None:
         if not settings.oauth_issuer:
             return None
         key = request.headers.get("x-dashboard-key", "")
-        if settings.dashboard_key and key and hmac.compare_digest(key, settings.dashboard_key):
-            return None
-        if signin.caregiver(request, family):
+        if keyed(request) or member(request):
             return None
         if signin.enabled() and not key:
+            if signin.signed_in(request) and not signin.caregiver(request, homes.resolve):
+                return JSONResponse({"error": "Set up your family first", "signup": "/welcome"}, status_code=401)
             return JSONResponse({"error": "Please sign in again", "login": signin.login_url("/dashboard")}, status_code=401)
         if not settings.dashboard_key:
             return JSONResponse({"error": OFF}, status_code=404)
@@ -70,7 +86,9 @@ def dashboard_routes(service: CareService) -> list[Route]:
     def html(request: Request, body: str) -> Response:
         if not settings.oauth_issuer:
             return HTMLResponse(body)
-        if signin.enabled() and not request.query_params.get("key") and not signin.caregiver(request, family):
+        if signin.enabled() and not request.query_params.get("key") and not member(request):
+            if signin.signed_in(request) and not signin.caregiver(request, homes.resolve):
+                return RedirectResponse("/welcome", status_code=302)  # signed in, no family yet
             return RedirectResponse(signin.login_url(request.url.path), status_code=302)
         if not signin.enabled() and not settings.dashboard_key:
             return HTMLResponse(f"<p>{OFF}</p>", status_code=404)
@@ -138,11 +156,15 @@ def dashboard_routes(service: CareService) -> list[Route]:
     async def call_ack(request: Request) -> Response:
         """The caregiver pressed a key on an alert call. Twilio's signature stands in for the dashboard key."""
         form = {k: str(v) for k, v in (await request.form()).items()}
-        url = f"{settings.public_url.rstrip('/')}{request.url.path}"
+        url = f"{settings.public_url.rstrip('/')}{request.url.path}" + (f"?{request.url.query}" if request.url.query else "")
         if not notify.twilio_signature_ok(url, form, request.headers.get("x-twilio-signature", "")):
             return Response(status_code=403)
-        alert = service.acknowledge(request.path_params["alert_id"]) if form.get("Digits") == "1" else None
-        p = service.profile()
+        home = request.query_params.get("h") or homes.first  # signed with the URL
+        if not homes.exists(home):
+            return Response(status_code=404)
+        with within(home):
+            alert = service.acknowledge(request.path_params["alert_id"]) if form.get("Digits") == "1" else None
+            p = service.profile()
         said = ("Thank you. Alert calls are working, and pressing 1 marks an alert as handled. Goodbye." if alert and alert.kind == "test"
                 else f"Thank you. The alert is marked as handled. Please check on {p.preferred_name}." if alert
                 else "Okay. The alert is still open in the Kinvesper dashboard. Goodbye.")
@@ -154,7 +176,9 @@ def dashboard_routes(service: CareService) -> list[Route]:
         if not telegram.secret_ok(request.headers.get("x-telegram-bot-api-secret-token", "")):
             return Response(status_code=403)
         try:
-            await service.telegram_update(await json_body(request))
+            update = await json_body(request)
+            with within(homes.telegram_household(update)):
+                await service.telegram_update(update)
         except Exception:  # answer 200 anyway, or Telegram resends the same update again and again
             log.exception("Telegram update failed")
         return Response(status_code=200)
@@ -174,9 +198,11 @@ def dashboard_routes(service: CareService) -> list[Route]:
         """A voice note or photo from the family's Telegram chat. The signed link stands in for the dashboard
         key, because the Echo fetches it with no headers of ours."""
         mid, q = request.path_params["message_id"], request.query_params
-        if not media.signature_ok(mid, q.get("e", ""), q.get("s", "")):
+        home = q.get("h") or homes.first
+        if not media.signature_ok(mid, q.get("e", ""), q.get("s", ""), home) or not homes.exists(home):
             return Response(status_code=403)
-        found = await service.family_media(mid)
+        with within(home):
+            found = await service.family_media(mid)
         if found is None:
             return Response(status_code=404)
         data, media_type = found
@@ -251,6 +277,64 @@ def dashboard_routes(service: CareService) -> list[Route]:
             return denied
         return JSONResponse({"raised": await check_once(service)})
 
+    def family_view(request: Request) -> dict:
+        home, s = household_id(), member(request)
+        listed = signin.family_emails(service.profile()) if home == homes.first else set()
+        return {
+            "members": [{"email": m.email, "added_by": m.added_by, "at": m.at} for m in homes.members(home)],
+            "also": sorted(listed - {m.email for m in homes.members(home)}),  # the first household's Settings emails
+            "you": (s or {}).get("email", ""),
+            "providers": signin.enabled(),
+        }
+
+    async def family(request: Request) -> Response:
+        if denied := guard(request):
+            return denied
+        if request.method == "GET":
+            return JSONResponse(family_view(request))
+        email = str((await json_body(request)).get("email") or "")
+        by = (member(request) or {}).get("email", "") or "dashboard key"
+        try:
+            if request.url.path.endswith("/remove"):
+                homes.remove_member(household_id(), email, by)
+            else:
+                homes.add_member(household_id(), email, by)
+        except SettingsError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse(family_view(request))
+
+    def newcomer(request: Request) -> dict | None:
+        """Signed in with Google or Amazon, and in no family yet."""
+        s = signin.signed_in(request)
+        return s if s and s.get("fed") and not homes.resolve(str(s.get("email") or ""), True) else None
+
+    async def welcome(request: Request) -> Response:
+        if not signin.enabled():
+            return RedirectResponse("/dashboard", status_code=302)
+        if not signin.signed_in(request):
+            return RedirectResponse(signin.login_url("/welcome"), status_code=302)
+        if not newcomer(request):
+            return RedirectResponse("/dashboard", status_code=302)
+        return HTMLResponse(welcome_page)
+
+    async def households(request: Request) -> Response:
+        s = newcomer(request) if signin.enabled() else None
+        if not s:
+            return JSONResponse({"error": "Sign in with Google or Amazon first", "login": signin.login_url("/welcome")},
+                                status_code=401)
+        if request.method == "GET":
+            return JSONResponse({"email": s.get("email", ""), "name": s.get("name", ""), "open": settings.signup})
+        if not settings.signup:
+            return JSONResponse({"error": "Kinvesper isn't taking new families right now."}, status_code=403)
+        body = await json_body(request)
+        try:
+            home = homes.create(str(s.get("email") or ""), str(body.get("your_name") or ""), str(body.get("patient_name") or ""),
+                                str(body.get("preferred_name") or ""), str(body.get("relation") or ""))
+        except SettingsError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        log.info("A new family signed up")
+        return JSONResponse({"household": home, "next": "/dashboard/settings"}, status_code=201)
+
     return [
         Route("/dashboard", dashboard_page),
         Route("/dashboard/settings", settings_html),
@@ -272,4 +356,8 @@ def dashboard_routes(service: CareService) -> list[Route]:
         Route("/media/{message_id}", family_media),
         Route("/api/telegram/link", telegram_link, methods=["POST"]),
         Route("/api/telegram/unlink", telegram_link, methods=["POST"]),
+        Route("/api/family", family, methods=["GET", "POST"]),
+        Route("/api/family/remove", family, methods=["POST"]),
+        Route("/welcome", welcome),
+        Route("/api/households", households, methods=["GET", "POST"]),
     ]

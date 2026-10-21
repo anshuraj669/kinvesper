@@ -1,6 +1,7 @@
 """Document store keyed by (kind, id), with a local JSON backend and a DynamoDB backend.
 
-DynamoDB layout (single table): pk = patient id, sk = "<kind>#<id>", data = JSON document.
+DynamoDB layout (single table): pk = household id, sk = "<kind>#<id>", data = JSON document.
+`scoped(name)` is the same store for another partition: another household, or the households directory.
 """
 
 from __future__ import annotations
@@ -33,6 +34,10 @@ class Store(ABC):
 
     @abstractmethod
     def clear(self) -> None: ...
+
+    @abstractmethod
+    def scoped(self, name: str) -> Store:
+        """The documents of another partition (household), kept apart from these."""
 
     # typed helpers
     def save(self, kind: str, model: BaseModel, id: str | None = None) -> None:
@@ -77,17 +82,52 @@ class JsonStore(Store):
             self._flush()
 
     def clear(self):
-        with self._lock:
-            self._data = {}
+        with self._lock:  # this partition's kinds; others' are "<partition>/<kind>"
+            self._data = {k: v for k, v in self._data.items() if "/" in k}
             self._flush()
+
+    def scoped(self, name):
+        return _Partition(self, name)
+
+
+class _Partition(Store):
+    """A JsonStore partition: kinds stored as "<name>/<kind>" in the same file."""
+
+    def __init__(self, base: JsonStore, name: str):
+        self._base, self._prefix = base, f"{name}/"
+
+    def put(self, kind, id, doc):
+        self._base.put(self._prefix + kind, id, doc)
+
+    def get(self, kind, id):
+        return self._base.get(self._prefix + kind, id)
+
+    def list(self, kind):
+        return self._base.list(self._prefix + kind)
+
+    def delete(self, kind, id):
+        self._base.delete(self._prefix + kind, id)
+
+    def clear(self):
+        with self._base._lock:
+            self._base._data = {k: v for k, v in self._base._data.items() if not k.startswith(self._prefix)}
+            self._base._flush()
+
+    def scoped(self, name):
+        return self._base.scoped(name)
 
 
 class DynamoStore(Store):
-    def __init__(self, table: str, pk: str, region: str):
-        import boto3
+    def __init__(self, table: str, pk: str, region: str, _table=None):
+        if _table is None:
+            import boto3
 
-        self._table = boto3.resource("dynamodb", region_name=region).Table(table)
+            _table = boto3.resource("dynamodb", region_name=region).Table(table)
+        self._table = _table
         self._pk = pk
+
+    def scoped(self, name):
+        return DynamoStore("", name, "", _table=self._table)
 
     def put(self, kind, id, doc):
         self._table.put_item(Item={"pk": self._pk, "sk": f"{kind}#{id}", "data": json.dumps(doc)})

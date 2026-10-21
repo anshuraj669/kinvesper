@@ -14,11 +14,13 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.testclient import TestClient
 
-from kinvesper import alexa, dashboard, signin
+from kinvesper import alexa, dashboard, households, signin
 from kinvesper.alexa import AlexaBridge
 from kinvesper.auth import JwtTokenVerifier
+from kinvesper.households import HouseholdRouter, Households
 from kinvesper.voice import VoiceSessions
 
 ISSUER = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TEST"
@@ -56,7 +58,7 @@ def cognito(monkeypatch):
 
     on = dataclasses.replace(signin.settings, oauth_issuer=ISSUER, login_client_id=CLIENT, dashboard_key=KEY,
                              public_url="http://testserver")
-    for module in (signin, dashboard):
+    for module in (signin, dashboard, households):
         monkeypatch.setattr(module, "settings", on)
     monkeypatch.setattr(signin, "_transport", httpx.MockTransport(api))
     monkeypatch.setattr(signin, "_jwks", StaticJwks())
@@ -68,10 +70,18 @@ def cognito(monkeypatch):
 
 
 @pytest.fixture
-def client(service, cognito):
-    family = lambda: signin.family_emails(service.profile())  # noqa: E731
-    return TestClient(Starlette(routes=[*signin.signin_routes(family), *dashboard.dashboard_routes(service)]),
-                      follow_redirects=False)
+def homes(service):
+    return Households(service)
+
+
+def app(homes):
+    return Starlette(routes=[*signin.signin_routes(homes.resolve), *dashboard.dashboard_routes(homes.current, homes)],
+                     middleware=[Middleware(HouseholdRouter, homes=homes)])
+
+
+@pytest.fixture
+def client(homes, cognito):
+    return TestClient(app(homes), follow_redirects=False)
 
 
 def sign_in(client, cognito, next_path="/dashboard"):
@@ -135,7 +145,8 @@ def test_off_site_next_links_are_ignored(client, cognito):
 GOOGLE = {"cognito:username": "google_1093", "identities": [{"providerName": "Google", "userId": "1093"}]}
 
 
-def test_google_logins_must_be_the_familys(client, cognito, service):
+def test_google_logins_must_be_the_familys(client, cognito, service, monkeypatch):
+    monkeypatch.setattr(signin, "settings", dataclasses.replace(signin.settings, signup=False))
     cognito["id_token"] = id_token(**GOOGLE, email="stranger@gmail.com")
     _, back = sign_in(client, cognito)
     assert back.status_code == 403 and "isn't one of this family's logins" in back.text
@@ -174,14 +185,13 @@ def access_token(**claims) -> str:
     return jwt.encode({**base, **claims}, PRIVATE, algorithm="RS256")
 
 
-def verifier(service):
+def verifier(homes, allow=True):
     settings = dataclasses.replace(signin.settings, oauth_issuer=ISSUER, oauth_audience="alexa-client")
-    return JwtTokenVerifier(settings, jwks_client=StaticJwks(),
-                            allow=signin.token_check(lambda: signin.family_emails(service.profile())))
+    return JwtTokenVerifier(settings, jwks_client=StaticJwks(), allow=signin.token_check(homes.resolve) if allow else None)
 
 
-def test_a_google_token_is_checked_against_the_family(cognito, service):
-    v = verifier(service)
+def test_a_google_token_is_checked_against_the_family(cognito, homes, service):
+    v = verifier(homes)
     assert asyncio.run(v.verify_token(access_token())) is not None  # a pool login
 
     stranger = access_token(username="google_1", sub="g1")
@@ -197,14 +207,11 @@ def test_a_google_token_is_checked_against_the_family(cognito, service):
 
 
 @pytest.fixture
-async def bridge(connect, monkeypatch, service, cognito):
+async def bridge(connect, monkeypatch, homes, cognito):
     monkeypatch.setattr(alexa.llm, "enabled", lambda: False)
     sessions = VoiceSessions(connect=connect)
-    v = verifier(service)
-
-    async def linked(token: str) -> bool:
-        return await v.verify_token(token) is not None
-    yield AlexaBridge(sessions, service, linked)
+    homes._verifier = verifier(homes, allow=False)
+    yield AlexaBridge(sessions, homes.current, homes.of_token, required=True)
     await sessions.close_all()
 
 

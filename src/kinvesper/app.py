@@ -1,5 +1,6 @@
 """HTTP entry point: MCP at /mcp, voice simulator at /voice, caregiver dashboard at /dashboard,
-and the public pages the Alexa+ store listing links to (/privacy, /terms)."""
+and the public pages the Alexa+ store listing links to (/privacy, /terms). Every request is about one
+household (households.py), set by HouseholdRouter before the routes run."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import logging
 
 import uvicorn
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
@@ -18,6 +20,7 @@ from .alexa import alexa_routes
 from .auth import metadata_routes
 from .config import settings
 from .dashboard import dashboard_routes
+from .households import HouseholdRouter, Households
 from .listing import listing_routes
 from .mcp_server import build_server
 from .seed import seed
@@ -36,8 +39,9 @@ def create_app(service: CareService | None = None, voice: VoiceSessions | None =
             log.info("Empty store: seeding demo household")
             seed(store)
         service = CareService(store)
+    homes = Households(service)
 
-    mcp = build_server(service)
+    mcp = build_server(homes.current)
     mcp_app = mcp.streamable_http_app()
     voice = voice or VoiceSessions()
 
@@ -46,7 +50,7 @@ def create_app(service: CareService | None = None, voice: VoiceSessions | None =
 
     @contextlib.asynccontextmanager
     async def lifespan(_app):
-        checks = asyncio.create_task(scheduler.run_forever(service))
+        checks = asyncio.create_task(scheduler.run_forever(homes))
         async with mcp.session_manager.run():
             try:
                 yield
@@ -56,12 +60,13 @@ def create_app(service: CareService | None = None, voice: VoiceSessions | None =
 
     routes = [
         Route("/health", health), *metadata_routes(settings),
-        *signin.signin_routes(lambda: signin.family_emails(service.profile())), *voice_routes(voice, service), *dashboard_routes(service),
-        *listing_routes(), *alexa_routes(voice, service),
+        *signin.signin_routes(homes.resolve), *voice_routes(voice, service, homes), *dashboard_routes(service, homes),
+        *listing_routes(), *alexa_routes(voice, homes.current),
         Mount("/", app=mcp_app),
     ]
-    app = Starlette(routes=routes, lifespan=lifespan)
+    app = Starlette(routes=routes, lifespan=lifespan, middleware=[Middleware(HouseholdRouter, homes=homes)])
     app.state.service = service
+    app.state.homes = homes
     app.state.mcp = mcp
     return app
 
@@ -79,7 +84,7 @@ def main() -> None:
         print("Seeded demo household.")
         return
     if args.check:
-        raised = asyncio.run(scheduler.check_once(CareService(make_store())))
+        raised = asyncio.run(scheduler.check_all(Households(make_store())))
         print(f"Checks done: {raised} new alert(s).")
         return
     log.info("Voice simulator: http://127.0.0.1:%s/voice", settings.port)

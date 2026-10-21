@@ -193,6 +193,7 @@ def test_dashboard_sign_in_client(template):
     assert logical_id in str(_env(template)["LOGIN_CLIENT_ID"])
     assert not template.find_resources("AWS::Cognito::UserPoolIdentityProvider")
     assert "ALEXA_ACCOUNT_LINKING" not in _env(template) and "CAREGIVER_LOGINS" not in _env(template)
+    assert "SIGNUP" not in _env(template)  # new families may sign up unless signup=off
 
 
 def test_google_login_reads_its_secret_at_deploy():
@@ -233,3 +234,7 @@ def test_login_with_amazon_reads_its_secret_at_deploy():
     assert "resolve:secretsmanager:kinvesper/amazon-client-secret" in str(idp["ProviderDetails"]["client_secret"])
     assert idp["AttributeMapping"]["email"] == "email"
     assert "LoginWithAmazon" in str(_clients(t)["DashboardClient"][1]["SupportedIdentityProviders"])
+
+
+def test_signup_can_be_closed():
+    assert _env(synth(public_url="https://abc.us-east-1.awsapprunner.com", signup=False))["SIGNUP"] == "off"

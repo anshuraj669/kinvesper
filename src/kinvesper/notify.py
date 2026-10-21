@@ -10,7 +10,9 @@
 - Email: SNS emails a topic's confirmed subscribers. Saving an email in the dashboard subscribes it to
   the alerts topic (SNS_TOPIC_ARN); Amazon sends a confirmation link, and alerts arrive once it's clicked.
   Each email subscribes with a filter for its audience: the caregiver gets every alert, the backup
-  contact only escalations. (Contacts subscribed at deploy time have no filter and get everything.)
+  contact only escalations. Another household's audiences are "<household>:caregiver" and
+  "<household>:backup", so families never get each other's alerts. (Contacts subscribed at deploy
+  time have no filter and get everything: keep those to the people who run the server.)
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from xml.sax.saxutils import escape
 
 import httpx
 
-from .config import settings
+from .config import household_id, settings
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +37,12 @@ PHONE = re.compile(r"^\+[1-9]\d{7,14}$")  # E.164
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 EmailStatus = Literal["confirmed", "pending", "not_subscribed", "no_topic", "unknown"]
 Audience = Literal["caregiver", "backup"]
+
+
+def _audience(audience: Audience) -> str:
+    """The audience as the alerts topic's filter sees it: the first household's plain, others' tagged."""
+    h = household_id()
+    return audience if h == settings.patient_id else f"{h}:{audience}"
 
 
 def _sns():
@@ -50,7 +58,7 @@ def _publish(subject: str, body: str, phone: str, audience: Audience) -> bool:
     sns, sent = _sns(), False
     if settings.sns_topic_arn:  # the audience's email, and anyone subscribed at deploy time
         sns.publish(TopicArn=settings.sns_topic_arn, Subject=subject[:99], Message=body,
-                    MessageAttributes={"audience": {"DataType": "String", "StringValue": audience}})
+                    MessageAttributes={"audience": {"DataType": "String", "StringValue": _audience(audience)}})
         sent = True
     if phone:
         try:
@@ -88,7 +96,7 @@ def _change_email(old: str, new: str, audience: Audience) -> None:
                 sns.unsubscribe(SubscriptionArn=s["SubscriptionArn"])
     if new and not any(s["Endpoint"].lower() == new.lower() and s["SubscriptionArn"].startswith("arn:") for s in subs):
         sns.subscribe(TopicArn=settings.sns_topic_arn, Protocol="email", Endpoint=new,  # sends the confirmation email
-                      Attributes={"FilterPolicy": json.dumps({"audience": [audience]})})
+                      Attributes={"FilterPolicy": json.dumps({"audience": [_audience(audience)]})})
 
 
 async def change_email(old: str, new: str, audience: Audience = "caregiver") -> None:
@@ -96,7 +104,7 @@ async def change_email(old: str, new: str, audience: Audience = "caregiver") -> 
     if not settings.sns_topic_arn or not (old or new):
         return
     try:
-        await asyncio.to_thread(_change_email, old, new, audience)
+        await asyncio.to_thread(_change_email, old, new, audience)  # to_thread keeps the household context
     except Exception as e:
         log.warning("Couldn't update the caregiver email subscription: %s", e)
 

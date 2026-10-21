@@ -10,7 +10,8 @@
     DELETE /api/voice/sessions/{sid}                    end a conversation
 
 With OAuth off (local dev) the simulator is open. With OAuth on it needs SERVICE_TOKEN (to reach
-/mcp) and SIMULATOR_KEY, sent by the page as X-Simulator-Key (open /voice?key=...).
+/mcp) and either SIMULATOR_KEY, sent by the page as X-Simulator-Key (open /voice?key=...; the first
+household), or a caregiver signed in to the dashboard (their own household).
 """
 
 from __future__ import annotations
@@ -26,8 +27,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from . import llm, media, reminders, speech
-from .config import now, settings
+from . import llm, media, reminders, signin, speech
+from .config import household_id, now, settings
+from .households import Households
 from .service import CareService, heard_messages
 from .voice import Announcement, VoiceSession, VoiceSessions
 
@@ -47,10 +49,8 @@ def simulator_status() -> str | None:
     return None
 
 
-def _allowed(request: Request) -> bool:
-    if not settings.oauth_issuer:
-        return True
-    return hmac.compare_digest(request.headers.get("x-simulator-key", ""), settings.simulator_key)
+def _keyed(request: Request) -> bool:
+    return bool(settings.simulator_key) and hmac.compare_digest(request.headers.get("x-simulator-key", ""), settings.simulator_key)
 
 
 def due_rings(service: CareService, session: VoiceSession) -> list[Announcement]:
@@ -75,24 +75,33 @@ def due_rings(service: CareService, session: VoiceSession) -> list[Announcement]
     return out
 
 
-def voice_routes(sessions: VoiceSessions, service: CareService | None = None) -> list[Route]:
+def voice_routes(sessions: VoiceSessions, service: CareService | None = None, homes: Households | None = None) -> list[Route]:
     page = files("kinvesper").joinpath("static/voice.html").read_text()
     last_check: dict[str, float] = {}
     background: set[asyncio.Task] = set()
+    if service is not None:
+        homes = homes or Households.of(service)
+        service = homes.current
+
+    def member(request: Request) -> bool:
+        s = signin.caregiver(request, homes.resolve) if homes else None
+        return bool(s) and s["household"] == household_id()
 
     def guard(request: Request) -> Response | None:
         if reason := simulator_status():
             return JSONResponse({"error": reason}, status_code=404)
-        if not _allowed(request):
+        if settings.oauth_issuer and not (_keyed(request) or member(request)):
             return JSONResponse({"error": "Missing or wrong simulator key"}, status_code=403)
         return None
 
     async def home(_: Request) -> Response:
         return RedirectResponse("/voice")
 
-    async def voice_page(_: Request) -> Response:
+    async def voice_page(request: Request) -> Response:
         if reason := simulator_status():
             return HTMLResponse(f"<p>{reason}</p>", status_code=404)
+        if signin.enabled() and not request.query_params.get("key") and not member(request):
+            return RedirectResponse(signin.login_url("/voice"), status_code=302)  # a family's own Kinvesper
         return HTMLResponse(page)
 
     async def create(request: Request) -> Response:
@@ -119,7 +128,7 @@ def voice_routes(sessions: VoiceSessions, service: CareService | None = None) ->
         if denied := guard(request):
             return None, denied
         session = sessions.get(request.path_params["sid"])
-        if session is None:
+        if session is None or session.household != household_id():
             return None, JSONResponse({"error": "Unknown or expired session"}, status_code=404)
         return session, None
 

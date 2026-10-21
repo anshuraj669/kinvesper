@@ -18,7 +18,7 @@ from collections import OrderedDict
 
 import anyio
 
-from .config import settings
+from .config import household_id, settings
 
 CACHE_SIZE = 16
 LINK_LIFETIME_S = 7 * 24 * 3600
@@ -30,24 +30,28 @@ def _key() -> bytes:
     return hmac.new(secret.encode(), b"kinvesper-media", hashlib.sha256).digest()
 
 
-def sign(message_id: str, expires: int) -> str:
-    return hmac.new(_key(), f"{message_id}:{expires}".encode(), hashlib.sha256).hexdigest()[:32]
+def sign(message_id: str, expires: int, household: str = "") -> str:
+    """The first household's links sign "<id>:<expires>"; another's "<household>/<id>:<expires>"."""
+    subject = f"{household}/{message_id}" if household and household != settings.patient_id else message_id
+    return hmac.new(_key(), f"{subject}:{expires}".encode(), hashlib.sha256).hexdigest()[:32]
 
 
 def url(message_id: str, absolute: bool = False) -> str:
     """A signed link to a family message's voice note (served as MP3, which every browser and Alexa play) or photo."""
-    expires = int(time.time()) + LINK_LIFETIME_S
-    link = f"/media/{message_id}?e={expires}&s={sign(message_id, expires)}"
+    expires, h = int(time.time()) + LINK_LIFETIME_S, household_id()
+    link = f"/media/{message_id}?e={expires}&s={sign(message_id, expires, h)}"
+    if h != settings.patient_id:
+        link += f"&h={h}"
     return settings.base_url.rstrip("/") + link if absolute else link
 
 
-def signature_ok(message_id: str, expires: str, signature: str) -> bool:
+def signature_ok(message_id: str, expires: str, signature: str, household: str = "") -> bool:
     try:
         if int(expires) < time.time():
             return False
     except ValueError:
         return False
-    return hmac.compare_digest(sign(message_id, int(expires)), signature or "")
+    return hmac.compare_digest(sign(message_id, int(expires), household), signature or "")
 
 
 def cached(key: str) -> tuple[bytes, str] | None:

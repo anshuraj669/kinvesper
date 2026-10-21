@@ -54,6 +54,7 @@ class KinvesperStack(cdk.Stack):
         amazon_client_id: str = "",
         caregiver_logins: str = "",
         alexa_account_linking: bool = False,
+        signup: bool = True,
         retain_data: bool = True,
         **kwargs,
     ) -> None:
@@ -252,6 +253,8 @@ class KinvesperStack(cdk.Stack):
             env["CAREGIVER_LOGINS"] = caregiver_logins  # more emails that may sign in with Google
         if alexa_account_linking:
             env["ALEXA_ACCOUNT_LINKING"] = "required"  # the skill answers only once a family login is linked
+        if not signup:
+            env["SIGNUP"] = "off"  # no new families: only those already set up
         if public_url:
             env["PUBLIC_URL"] = public_url.rstrip("/")
         if alexa_skill_id:
