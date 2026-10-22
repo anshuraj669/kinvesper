@@ -70,29 +70,34 @@ def dashboard_routes(service: CareService, homes: Households | None = None) -> l
         return s if s and s["household"] == household_id() else None
 
     def guard(request: Request) -> Response | None:
-        if not settings.oauth_issuer:
-            return None
-        key = request.headers.get("x-dashboard-key", "")
         if keyed(request) or member(request):
             return None
+        key = request.headers.get("x-dashboard-key", "")
         if signin.enabled() and not key:
             if signin.signed_in(request) and not signin.caregiver(request, homes.resolve):
                 return JSONResponse({"error": "Set up your family first", "signup": "/welcome"}, status_code=401)
             return JSONResponse({"error": "Please sign in again", "login": signin.login_url("/dashboard")}, status_code=401)
-        if not settings.dashboard_key:
-            return JSONResponse({"error": OFF}, status_code=404)
-        return JSONResponse({"error": "Missing or wrong dashboard key"}, status_code=403)
+        if settings.dashboard_key:
+            return JSONResponse({"error": "Missing or wrong dashboard key"}, status_code=403)
+        if not settings.oauth_issuer:
+            return None  # nothing to check against (tests); `kinvesper` itself always makes a key
+        return JSONResponse({"error": OFF}, status_code=404)
 
     def html(request: Request, body: str) -> Response:
-        if not settings.oauth_issuer:
+        """A page only for someone allowed in: its ?key= link or a family member signed in."""
+        key = request.query_params.get("key", "")
+        if (settings.dashboard_key and key and hmac.compare_digest(key, settings.dashboard_key)) or member(request):
             return HTMLResponse(body)
-        if signin.enabled() and not request.query_params.get("key") and not member(request):
+        if signin.enabled():
             if signin.signed_in(request) and not signin.caregiver(request, homes.resolve):
                 return RedirectResponse("/welcome", status_code=302)  # signed in, no family yet
             return RedirectResponse(signin.login_url(request.url.path), status_code=302)
-        if not signin.enabled() and not settings.dashboard_key:
-            return HTMLResponse(f"<p>{OFF}</p>", status_code=404)
-        return HTMLResponse(body)
+        if settings.dashboard_key:
+            return signin.page("This dashboard is private", "Open it with its private link, the one that ends in ?key=…",
+                               request.url.path, "Try again", status=401)
+        if not settings.oauth_issuer:
+            return HTMLResponse(body)
+        return HTMLResponse(f"<p>{OFF}</p>", status_code=404)
 
     async def dashboard_page(request: Request) -> Response:
         return html(request, page)

@@ -35,6 +35,19 @@ export SNS_TOPIC_ARN="$(output AlertsTopic)"
 export SCHEDULER_INTERVAL_S=0  # EventBridge already runs the checks against the same table
 [[ -n "$DYNAMODB_TABLE" && -n "$SNS_TOPIC_ARN" ]] || die "stack '$STACK' is missing the TableName or AlertsTopic output"
 
+# Sign-in as in the cloud: the dashboard asks for Google/Amazon (the stack's Cognito) or its ?key= link.
+# Cognito only returns to http://localhost:8000, so open the app at localhost, not 127.0.0.1.
+secret() { [[ -n "$1" ]] && aws secretsmanager get-secret-value --secret-id "$1" --query SecretString --output text 2>/dev/null; }
+export PORT="${PORT:-8000}"
+if [[ -n "$(output DashboardLoginClientId)" && "$PORT" == 8000 ]]; then
+  export OAUTH_ISSUER="$(output OAuthIssuer)" LOGIN_CLIENT_ID="$(output DashboardLoginClientId)"
+  OAUTH_AUDIENCE=$(printf '%s\n' "$(output OAuthClientId)" "$(output AlexaClientId)" "$(output DashboardLoginClientId)" | paste -sd, | sed 's/,,*/,/g; s/,$//')
+  export OAUTH_AUDIENCE OAUTH_SCOPES="${OAUTH_SCOPES:-kinvesper/mcp}" PUBLIC_URL="http://localhost:$PORT"
+fi
+[[ -n "${DASHBOARD_KEY:-}" ]] || export DASHBOARD_KEY="$(secret "$(output DashboardKeySecret)")"
+[[ -n "${SIMULATOR_KEY:-}" ]] || export SIMULATOR_KEY="$(secret "$(output SimulatorKeySecret)")"
+[[ -n "${SERVICE_TOKEN:-}" ]] || export SERVICE_TOKEN="$(secret "$(output ServiceTokenSecret)")"
+
 # Claude: the key from .env, else the one stored in the stack (make claude-key); otherwise Ollama.
 if [[ "${LLM_PROVIDER:-anthropic}" == anthropic && -z "${ANTHROPIC_API_KEY:-}" && -n "$(output ClaudeApiKeySecret)" ]]; then
   key=$(aws secretsmanager get-secret-value --secret-id "$(output ClaudeApiKeySecret)" \
@@ -64,6 +77,7 @@ Kinvesper (local) -> AWS stack '$STACK' in $AWS_REGION
   DynamoDB table : $DYNAMODB_TABLE
   SNS topic      : $SNS_TOPIC_ARN
   LLM            : $llm
+  Dashboard      : http://localhost:$PORT/dashboard (sign in, or add ?key=<DashboardKey>)
 EOF
 
 cd "$(dirname "$0")/.."

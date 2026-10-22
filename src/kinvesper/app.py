@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import contextlib
 import logging
+import secrets
 
 import uvicorn
 from starlette.applications import Starlette
@@ -88,7 +89,13 @@ def main() -> None:
         print(f"Checks done: {raised} new alert(s).")
         return
     log.info("Voice simulator: http://127.0.0.1:%s/voice", settings.port)
-    log.info("Caregiver dashboard: http://127.0.0.1:%s/dashboard", settings.port)
+    if signin.enabled():
+        log.info("Caregiver dashboard (sign in): %s/dashboard", settings.base_url.rstrip("/"))
+    if not settings.dashboard_key:  # never an open dashboard: a private link for this run
+        object.__setattr__(settings, "dashboard_key", secrets.token_urlsafe(18))
+        log.info("Caregiver dashboard (private link): %s/dashboard?key=%s", settings.base_url.rstrip("/"), settings.dashboard_key)
+    elif not signin.enabled():
+        log.info("Caregiver dashboard: %s/dashboard?key=<DASHBOARD_KEY>", settings.base_url.rstrip("/"))
     uvicorn.run(create_app(), host=settings.host, port=settings.port)
 
 

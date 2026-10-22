@@ -122,7 +122,8 @@ def test_the_dashboard_sends_you_to_sign_in_and_back(client, cognito, service):
 
 
 def test_the_key_link_still_works(client):
-    assert client.get("/dashboard?key=anything").status_code == 200  # the page; its calls carry the key
+    assert client.get(f"/dashboard?key={KEY}").status_code == 200  # the page; its calls carry the key
+    assert client.get("/dashboard?key=wrong").status_code == 302  # to sign-in
     assert client.get("/api/dashboard", headers={"x-dashboard-key": KEY}).status_code == 200
     assert client.get("/api/dashboard", headers={"x-dashboard-key": "wrong"}).status_code == 403
 

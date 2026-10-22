@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from conftest import SYSTEM
+from conftest import DASHBOARD_KEY, KEYED, SYSTEM
 
 from kinvesper import interactions, llm, notify, voice, web
 from kinvesper import service as service_module
@@ -349,17 +349,17 @@ async def test_echo_reads_family_messages_on_launch(service, connect, monkeypatc
 
 def test_dashboard_feature_endpoints(fresh_server):
     base = fresh_server
-    assert httpx.get(f"{base}/dashboard/doctor").status_code == 200
-    report = httpx.get(f"{base}/api/reports/doctor?days=14").json()
+    assert httpx.get(f"{base}/dashboard/doctor?key={DASHBOARD_KEY}").status_code == 200
+    report = httpx.get(f"{base}/api/reports/doctor?days=14", headers=KEYED).json()
     assert report["days"] == 14 and report["questions"]
-    sent = httpx.post(f"{base}/api/messages", json={"text": "See you soon"})
+    sent = httpx.post(f"{base}/api/messages", json={"text": "See you soon"}, headers=KEYED)
     assert sent.status_code == 200 and sent.json()["sender"] == "Priya"
-    assert httpx.post(f"{base}/api/messages", json={"text": ""}).status_code == 400
-    assert httpx.get(f"{base}/api/dashboard").json()["family_messages"][0]["text"] == "See you soon"
-    scan = httpx.post(f"{base}/api/medications/scan", content=b"\xff\xd8", headers={"Content-Type": "image/jpeg"})
+    assert httpx.post(f"{base}/api/messages", json={"text": ""}, headers=KEYED).status_code == 400
+    assert httpx.get(f"{base}/api/dashboard", headers=KEYED).json()["family_messages"][0]["text"] == "See you soon"
+    scan = httpx.post(f"{base}/api/medications/scan", content=b"\xff\xd8", headers={**KEYED, "Content-Type": "image/jpeg"})
     assert scan.status_code == 422 and "needs Claude" in scan.json()["error"]
-    assert httpx.post(f"{base}/api/ask", json={"question": "How is she?"}).json()["answer"].startswith("Ask Kinvesper needs Claude")
-    assert httpx.post(f"{base}/api/ask", json={}).status_code == 400
+    assert httpx.post(f"{base}/api/ask", json={"question": "How is she?"}, headers=KEYED).json()["answer"].startswith("Ask Kinvesper needs Claude")
+    assert httpx.post(f"{base}/api/ask", json={}, headers=KEYED).status_code == 400
 
 
 async def test_new_medicine_isnt_missed_before_it_was_added(service, clock):
@@ -424,10 +424,10 @@ async def test_twilio_call_reads_the_alert_and_offers_press_1(service, twilio):
 
 
 def test_press_1_acknowledges_only_when_signed_by_twilio(service, twilio):
+    from starlette.applications import Starlette
     from starlette.testclient import TestClient
 
     from kinvesper.dashboard import dashboard_routes
-    from starlette.applications import Starlette
 
     alert = __import__("asyncio").run(service.raise_alert("urgent", "emergency", "EMERGENCY", "fell", sms=False))
     client = TestClient(Starlette(routes=dashboard_routes(service)))

@@ -46,7 +46,7 @@ cat <<EOF
 
 Kinvesper is starting (brain: $LLM_PROVIDER). Open:
   Voice simulator     http://127.0.0.1:$PORT/voice
-  Caregiver dashboard http://127.0.0.1:$PORT/dashboard
+  Caregiver dashboard the private link with ?key= in the log below
   MCP endpoint        http://127.0.0.1:$PORT/mcp
 Press Ctrl+C to stop.
 

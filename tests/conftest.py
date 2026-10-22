@@ -1,12 +1,11 @@
 import contextlib
 import dataclasses
+import json
 import os
 import socket
 import subprocess
 import sys
 import time
-
-import json
 
 import httpx
 import pytest
@@ -46,6 +45,10 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+DASHBOARD_KEY = "test-dashboard-key"
+KEYED = {"x-dashboard-key": DASHBOARD_KEY}
+
+
 def _run_server(data_dir, port=None, **extra_env):
     port = port or _free_port()
     env = {
@@ -56,6 +59,7 @@ def _run_server(data_dir, port=None, **extra_env):
         "STT_PROVIDER": "off",  # no Whisper download or AWS calls in tests
         "TTS_PROVIDER": "browser",  # no AWS calls in tests
         "REFILL_STEP_SECONDS": "0.3",  # long enough for a client polling every 0.5 s to see progress
+        "DASHBOARD_KEY": DASHBOARD_KEY,  # the dashboard never opens without one
         **extra_env,
     }
     proc = subprocess.Popen([sys.executable, "-m", "kinvesper.app"], env=env)

@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import httpx
 import pytest
+from conftest import DASHBOARD_KEY, KEYED
 
 from kinvesper import notify
 from kinvesper import service as service_module
@@ -141,26 +142,26 @@ async def test_voice_uses_the_saved_household(service, connect, monkeypatch):
 
 def test_settings_api(fresh_server):
     base = fresh_server
-    assert httpx.get(f"{base}/dashboard/settings").status_code == 200
-    view = httpx.get(f"{base}/api/settings").json()
+    assert httpx.get(f"{base}/dashboard/settings?key={DASHBOARD_KEY}").status_code == 200
+    view = httpx.get(f"{base}/api/settings", headers=KEYED).json()
     assert view["email_status"] == "no_topic"  # local: alerts are logged
     profile = {**view["profile"], "caregiver_name": "Sam", "caregiver_email": "sam@example.com"}
-    saved = httpx.put(f"{base}/api/settings", json={"profile": profile, "medications": view["medications"]}).json()
+    saved = httpx.put(f"{base}/api/settings", json={"profile": profile, "medications": view["medications"]}, headers=KEYED).json()
     assert saved["profile"]["caregiver_name"] == "Sam"
-    assert httpx.get(f"{base}/api/dashboard").json()["profile"]["caregiver_name"] == "Sam"
+    assert httpx.get(f"{base}/api/dashboard", headers=KEYED).json()["profile"]["caregiver_name"] == "Sam"
 
-    bad = httpx.put(f"{base}/api/settings", json={"profile": {**profile, "caregiver_phone": "123"}, "medications": []})
+    bad = httpx.put(f"{base}/api/settings", json={"profile": {**profile, "caregiver_phone": "123"}, "medications": []}, headers=KEYED)
     assert bad.status_code == 400 and "country code" in bad.json()["error"]
-    assert httpx.put(f"{base}/api/settings", content=b"nope").status_code == 400
+    assert httpx.put(f"{base}/api/settings", content=b"nope", headers=KEYED).status_code == 400
 
-    test = httpx.post(f"{base}/api/settings/test-alert").json()
+    test = httpx.post(f"{base}/api/settings/test-alert", headers=KEYED).json()
     assert test["sent"] is False  # no SNS locally
-    assert httpx.get(f"{base}/api/dashboard").json()["alerts"][0]["kind"] == "test"
+    assert httpx.get(f"{base}/api/dashboard", headers=KEYED).json()["alerts"][0]["kind"] == "test"
 
 
 def test_settings_need_the_dashboard_key(auth_server):
-    assert httpx.get(f"{auth_server}/api/settings").status_code == 404
-    assert httpx.put(f"{auth_server}/api/settings", json={}).status_code == 404
+    assert httpx.get(f"{auth_server}/api/settings").status_code == 403
+    assert httpx.put(f"{auth_server}/api/settings", json={}).status_code == 403
 
 
 # ---------- trusted contacts ----------

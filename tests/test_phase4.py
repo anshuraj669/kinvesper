@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import httpx
 import pytest
+from conftest import DASHBOARD_KEY, KEYED
 
 from kinvesper import service as service_module
 from kinvesper.config import now
@@ -132,13 +133,14 @@ def test_dashboard_data(service):
 
 def test_dashboard_api(server_url):
     base = server_url.removesuffix("/mcp")
-    assert httpx.get(f"{base}/dashboard").status_code == 200
+    assert httpx.get(f"{base}/dashboard?key={DASHBOARD_KEY}").status_code == 200
 
     # a dose logged through the voice simulator shows up on the dashboard
     slot = (now() - timedelta(minutes=1)).strftime("%H:%M")
     sid = httpx.post(f"{base}/api/voice/sessions").json()["id"]
     turns = f"{base}/api/voice/sessions/{sid}/turns"
     import asyncio
+
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
 
@@ -150,16 +152,19 @@ def test_dashboard_api(server_url):
 
     asyncio.run(add_med())
     httpx.post(turns, json={"text": "I just took my Dashboxin"}, timeout=30)
-    data = httpx.get(f"{base}/api/dashboard").json()
+    data = httpx.get(f"{base}/api/dashboard", headers=KEYED).json()
     item = next(i for i in data["today"]["items"] if i["medication"] == "Dashboxin")
     assert item["status"] == "taken"
 
-    assert "raised" in httpx.post(f"{base}/api/checks").json()
-    alert_id = httpx.get(f"{base}/api/dashboard").json()["alerts"][0]["id"]
-    assert httpx.post(f"{base}/api/alerts/{alert_id}/ack").json()["acknowledged"] is True
-    assert httpx.post(f"{base}/api/alerts/nope/ack").status_code == 404
+    assert "raised" in httpx.post(f"{base}/api/checks", headers=KEYED).json()
+    alert_id = httpx.get(f"{base}/api/dashboard", headers=KEYED).json()["alerts"][0]["id"]
+    assert httpx.post(f"{base}/api/alerts/{alert_id}/ack", headers=KEYED).json()["acknowledged"] is True
+    assert httpx.post(f"{base}/api/alerts/nope/ack", headers=KEYED).status_code == 404
 
 
-def test_dashboard_off_with_oauth_and_no_key(auth_server):
-    assert httpx.get(f"{auth_server}/dashboard").status_code == 404
-    assert httpx.get(f"{auth_server}/api/dashboard").status_code == 404
+def test_dashboard_needs_its_key(auth_server):
+    assert httpx.get(f"{auth_server}/dashboard").status_code == 401
+    assert httpx.get(f"{auth_server}/dashboard?key=wrong").status_code == 401
+    assert httpx.get(f"{auth_server}/api/dashboard").status_code == 403
+    assert httpx.get(f"{auth_server}/dashboard?key={DASHBOARD_KEY}").status_code == 200
+    assert httpx.get(f"{auth_server}/api/dashboard", headers=KEYED).status_code == 200
