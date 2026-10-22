@@ -82,3 +82,18 @@ we worked around it. Severity: **High** blocked a feature, **Medium** cost hours
 - **Workaround:** the server falls back to an offline keyword router (`LLM_PROVIDER=none`) and can
   use the Claude API directly (`LLM_PROVIDER=anthropic`).
 - **Suggestion:** grant access through CloudFormation or the CDK.
+
+## 8. SMS through Amazon SNS isn't usable on a new account (High)
+
+- **Task:** text the caregiver when a dose is missed or a scam call is caught.
+- **Steps:** `sns.publish(PhoneNumber=...)` to the caregiver's +91 number.
+- **Expected:** a text arrives, as with email through the same topic.
+- **Actual:** a new account's SMS is in a sandbox that only texts verified numbers. The account
+  can also have a $0 SMS spend limit, so adding a number fails with `AuthorizationError`.
+  India (+91) needs DLT sender registration. Spoken calls through AWS End User Messaging likewise
+  wait on a voice spending-limit increase.
+- **Workaround:** alerts go to Telegram (free, instant, no verification) and email through SNS;
+  urgent phone calls use Twilio. The SMS code stays in place, and a failed text never stops the
+  email.
+- **Suggestion:** one checklist for production SMS (sandbox exit, spend limit, per-country
+  registration such as India's DLT), and errors that name the missing step.
